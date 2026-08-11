@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="ShiftWatch Kalender">
+  <rect width="512" height="512" rx="112" fill="#17324d"/>
+  <rect x="88" y="112" width="336" height="312" rx="48" fill="#ffffff"/>
+  <path d="M88 184h336v-24c0-26.5-21.5-48-48-48H136c-26.5 0-48 21.5-48 48v24Z" fill="#087f73"/>
+  <path d="M168 76v72M344 76v72" stroke="#dff8f3" stroke-width="28" stroke-linecap="round"/>
+  <rect x="142" y="230" width="68" height="62" rx="15" fill="#ccefdc" stroke="#63ad7b" stroke-width="8"/>
+  <rect x="222" y="230" width="68" height="62" rx="15" fill="#cfe3ff" stroke="#6e9edb" stroke-width="8"/>
+  <rect x="302" y="230" width="68" height="62" rx="15" fill="#ffd6d6" stroke="#d66d6d" stroke-width="8"/>
+  <rect x="142" y="310" width="68" height="62" rx="15" fill="#ccefdc" stroke="#63ad7b" stroke-width="8"/>
+  <rect x="222" y="310" width="68" height="62" rx="15" fill="#ffffff" stroke="#dbe3e9" stroke-width="8"/>
+  <rect x="302" y="310" width="68" height="62" rx="15" fill="#ccefdc" stroke="#63ad7b" stroke-width="8"/>
+</svg>

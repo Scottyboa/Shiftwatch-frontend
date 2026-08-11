@@ -1,0 +1,19 @@
+{
+  "name": "ShiftWatch Kalender",
+  "short_name": "SW Kalender",
+  "description": "Backend-fri kalendereditor for ShiftWatch.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f3f6f8",
+  "theme_color": "#17324d",
+  "lang": "nb",
+  "icons": [
+    {
+      "src": "assets/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
