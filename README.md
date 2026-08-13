@@ -1,5 +1,8 @@
 # ShiftWatch Kalender
 
+Versjon 2.0.1 inkluderer kompatibilitetsretting for Microsoft Graph-kall i
+Safari/WebKit på iPhone og nettverks-først oppdatering av appens lokale cache.
+
 En statisk, responsiv kalendereditor som henter og publiserer ShiftWatch sine
 seks delte kalenderfelt direkte i OneDrive App Folder via Microsoft Graph.
 Nettsiden har ingen backend og fungerer fra både PC og mobil.

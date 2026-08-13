@@ -101,10 +101,13 @@ async function graphError(response) {
 }
 
 export class OneDriveCalendarStore {
-  constructor({ session, fileName, fetchImpl = globalThis.fetch } = {}) {
+  constructor({ session, fileName, fetchImpl } = {}) {
     this.session = session;
     this.fileName = fileName;
-    this.fetchImpl = fetchImpl;
+    // Safari/WebKit requires Window.fetch to be invoked with Window as its
+    // receiver. Chromium currently tolerates an unbound reference, which hid
+    // this on Windows. Keep injected test/client functions untouched.
+    this.fetchImpl = fetchImpl ?? globalThis.fetch.bind(globalThis);
     this.appRootId = null;
   }
 

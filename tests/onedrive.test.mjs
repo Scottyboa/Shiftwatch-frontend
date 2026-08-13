@@ -78,6 +78,26 @@ test("derives the GitHub Pages directory as the SPA redirect URI", () => {
   );
 });
 
+test("binds the native fetch implementation for Safari/WebKit", async () => {
+  const originalFetch = globalThis.fetch;
+  let observedReceiver = null;
+  globalThis.fetch = function safariStyleFetch() {
+    observedReceiver = this;
+    return Promise.resolve(new Response("{}", { status: 200 }));
+  };
+
+  try {
+    const store = new OneDriveCalendarStore({
+      session: { getAccessToken: async () => "token" },
+      fileName: "calendar.json",
+    });
+    await store.request("https://graph.microsoft.com/v1.0/me");
+    assert.equal(observedReceiver, globalThis);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("OneDrive store downloads metadata/content and uploads through App Folder", async () => {
   const calls = [];
   const remotePayload = buildSharedCalendarPayload(criteria, {
