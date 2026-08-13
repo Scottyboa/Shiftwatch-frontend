@@ -28,39 +28,45 @@
     </header>
 
     <main class="page-shell">
-      <section class="card import-card" aria-labelledby="import-title">
+      <section class="card sync-card" aria-labelledby="sync-title">
         <div class="section-heading">
           <div>
             <span class="step">1</span>
-            <h2 id="import-title">Sett inn config</h2>
+            <h2 id="sync-title">OneDrive-kalender</h2>
           </div>
-          <button id="load-repo-config" class="button button-ghost" type="button">
-            Last repo-config på nytt
-          </button>
+          <span id="connection-status" class="connection-status is-offline" aria-live="polite">
+            Ikke tilkoblet
+          </span>
         </div>
         <p class="section-copy">
-          Lim inn hele <code>config.yaml</code>. Bare kalenderfeltene i
-          <code>criteria</code> brukes av editoren; resten beholdes lokalt for eventuell
-          kopiering av oppdatert config.
+          Hent den gjeldende kalenderen direkte fra ShiftWatch sin private OneDrive-mappe,
+          gjør endringene nedenfor og publiser dem tilbake. Første trykk åpner sikker
+          Microsoft-innlogging. Ingen e-postadresse, passord eller token ligger i nettsiden.
         </p>
-        <label class="sr-only" for="config-input">Hele config.yaml</label>
-        <textarea
-          id="config-input"
-          class="config-input"
-          rows="13"
-          spellcheck="false"
-          autocapitalize="off"
-          autocomplete="off"
-          placeholder="Lim inn hele config.yaml her …"
-        ></textarea>
-        <div class="button-row import-actions">
-          <button id="insert-config" class="button button-primary" type="button">
-            Sett inn
+        <div class="button-row sync-actions">
+          <button
+            id="fetch-onedrive"
+            class="button button-primary"
+            type="button"
+            title="Henter siste publiserte kalenderkriterier fra OneDrive App Folder"
+          >
+            Hent siste kalender
           </button>
-          <button id="paste-config" class="button button-secondary" type="button">
-            Lim inn fra utklippstavle
+          <button
+            id="publish-onedrive"
+            class="button button-blue"
+            type="button"
+            disabled
+            title="Publiserer kalenderendringene til alle ShiftWatch-agenter via OneDrive"
+          >
+            Publiser kalender
           </button>
-          <span id="config-source" class="muted-text" aria-live="polite"></span>
+          <button id="disconnect-onedrive" class="button button-ghost" type="button" hidden>
+            Koble fra
+          </button>
+        </div>
+        <div id="sync-details" class="sync-details" aria-live="polite">
+          Kalenderen er låst til siste OneDrive-versjon er hentet.
         </div>
       </section>
 
@@ -137,43 +143,14 @@
         </aside>
       </section>
 
-      <section id="copy-section" class="card copy-card is-disabled" aria-labelledby="copy-title">
-        <div class="section-heading">
-          <div>
-            <span class="step">3</span>
-            <h2 id="copy-title">Kopier resultatet</h2>
-          </div>
-          <span
-            class="subject-hint"
-            title="Bruk nøyaktig dette som tema når kalenderkommandoen sendes"
-          >
-            Tema: <code id="subject-text">Shiftwatch changes</code>
-          </span>
-        </div>
-        <p class="section-copy">
-          «Copy» kopierer bare en robust ShiftWatch-kommando med kalenderfeltene. Andre
-          innstillinger fra config-filen blir ikke med.
-        </p>
-        <div class="button-row copy-actions">
-          <button id="copy-command" class="button button-copy" type="button">Copy</button>
-          <button id="copy-full-config" class="button button-secondary" type="button">
-            Kopier oppdatert full config
-          </button>
-        </div>
-        <div id="command-fallback" class="command-fallback" hidden>
-          <label for="command-output">Kopier teksten manuelt:</label>
-          <textarea id="command-output" rows="8" readonly spellcheck="false"></textarea>
-        </div>
-      </section>
-
       <div id="status-message" class="status-message" role="status" aria-live="polite"></div>
     </main>
 
     <footer>
-      Kalenderdata behandles lokalt. Appen sender ingenting og bruker ingen backend.
+      Ingen backend. Kalenderdata sendes bare mellom nettleseren og din private OneDrive App Folder.
     </footer>
 
-    <script src="vendor/js-yaml.min.js"></script>
+    <script src="vendor/msal-browser.min.js"></script>
     <script type="module" src="src/app.js"></script>
   </body>
 </html>

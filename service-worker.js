@@ -1,14 +1,16 @@
-const CACHE_NAME = "shiftwatch-calendar-v1";
+const CACHE_NAME = "shiftwatch-calendar-v2";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./styles.css",
   "./manifest.webmanifest",
   "./assets/icon.svg",
-  "./config/default-config.yaml",
   "./src/app.js",
   "./src/calendar-core.js",
-  "./vendor/js-yaml.min.js",
+  "./src/onedrive-config.js",
+  "./src/onedrive-core.js",
+  "./src/onedrive-sync.js",
+  "./vendor/msal-browser.min.js",
 ];
 
 self.addEventListener("install", (event) => {
@@ -30,20 +32,6 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   const url = new URL(event.request.url);
-
-  // Repo-configen er network-first slik at en GitHub-endring vises med en gang.
-  if (url.pathname.endsWith("/config/default-config.yaml")) {
-    event.respondWith(
-      fetch(event.request)
-        .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put("./config/default-config.yaml", copy));
-          return response;
-        })
-        .catch(() => caches.match("./config/default-config.yaml")),
-    );
-    return;
-  }
 
   event.respondWith(
     caches.match(event.request).then(

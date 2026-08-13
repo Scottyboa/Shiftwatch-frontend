@@ -138,8 +138,7 @@ code {
   box-shadow: var(--shadow);
 }
 
-.import-card,
-.copy-card {
+.sync-card {
   padding: clamp(18px, 2.5vw, 28px);
 }
 
@@ -183,29 +182,6 @@ code {
   line-height: 1.55;
 }
 
-.config-input,
-#command-output {
-  display: block;
-  width: 100%;
-  padding: 14px;
-  resize: vertical;
-  border: 1px solid #bdcad3;
-  border-radius: 11px;
-  outline: none;
-  color: #172534;
-  background: #fbfcfd;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: 0.83rem;
-  line-height: 1.5;
-  tab-size: 2;
-}
-
-.config-input:focus,
-#command-output:focus {
-  border-color: var(--teal);
-  box-shadow: 0 0 0 3px rgb(8 127 115 / 12%);
-}
-
 .button-row {
   display: flex;
   flex-wrap: wrap;
@@ -213,7 +189,7 @@ code {
   gap: 9px;
 }
 
-.import-actions {
+.sync-actions {
   margin-top: 12px;
 }
 
@@ -235,6 +211,13 @@ code {
 
 .button:active {
   transform: translateY(0);
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+  opacity: 0.48;
 }
 
 .button-primary {
@@ -270,16 +253,56 @@ code {
   background: var(--excluded);
 }
 
-.button-copy {
-  min-width: 150px;
-  color: white;
-  background: linear-gradient(120deg, #17324d, #245b7c);
-  font-size: 1rem;
+.connection-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 11px;
+  border: 1px solid;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 750;
+  white-space: nowrap;
 }
 
-.muted-text {
-  color: var(--muted);
-  font-size: 0.82rem;
+.connection-status::before {
+  width: 8px;
+  height: 8px;
+  margin-right: 7px;
+  border-radius: 50%;
+  content: "";
+}
+
+.connection-status.is-offline {
+  border-color: #d6dde2;
+  color: #66737e;
+  background: #f3f5f6;
+}
+
+.connection-status.is-offline::before {
+  background: #9ba5ad;
+}
+
+.connection-status.is-online {
+  border-color: #8ec3a0;
+  color: #185a30;
+  background: #eaf8ee;
+}
+
+.connection-status.is-online::before {
+  background: #29914d;
+  box-shadow: 0 0 0 3px rgb(41 145 77 / 13%);
+}
+
+.sync-details {
+  min-height: 43px;
+  margin-top: 13px;
+  padding: 11px 13px;
+  border: 1px solid #dce5ea;
+  border-radius: 10px;
+  color: #52616e;
+  background: #f7f9fa;
+  font-size: 0.8rem;
+  line-height: 1.45;
 }
 
 .editor-layout {
@@ -645,38 +668,6 @@ summary {
   font-size: 0.74rem;
 }
 
-.copy-card {
-  margin-top: 22px;
-}
-
-.subject-hint {
-  display: inline-flex;
-  align-items: center;
-  padding: 7px 10px;
-  border: 1px solid #d4deea;
-  border-radius: 9px;
-  color: #4e5d6a;
-  background: #f7f9fb;
-  font-size: 0.78rem;
-  white-space: nowrap;
-}
-
-.copy-actions {
-  margin-top: 8px;
-}
-
-.command-fallback {
-  margin-top: 15px;
-}
-
-.command-fallback label {
-  display: block;
-  margin-bottom: 7px;
-  color: var(--muted);
-  font-size: 0.82rem;
-  font-weight: 700;
-}
-
 .is-disabled {
   pointer-events: none;
   opacity: 0.45;
@@ -797,22 +788,19 @@ footer {
     align-items: flex-start;
   }
 
-  .import-card .section-heading,
-  .copy-card .section-heading {
+  .sync-card .section-heading {
     flex-direction: column;
   }
 
-  .button-row .button {
+  .sync-actions .button,
+  .action-stack .button {
     flex: 1 1 100%;
+    min-height: 48px;
   }
 
-  .muted-text {
-    width: 100%;
-  }
-
-  .config-input {
-    min-height: 270px;
-    font-size: 0.76rem;
+  .sync-actions {
+    display: grid;
+    grid-template-columns: 1fr;
   }
 
   .editor-sidebar {
@@ -841,12 +829,8 @@ footer {
     grid-template-columns: repeat(4, 1fr);
   }
 
-  .subject-hint {
-    white-space: normal;
-  }
-
-  .copy-actions .button {
-    min-height: 48px;
+  .sync-details {
+    font-size: 0.77rem;
   }
 }
 

@@ -1,55 +1,43 @@
 import {
-  SUBJECT_TEXT,
   WEEKDAYS,
   addDates,
   addPeriod,
-  applyCalendarToConfig,
   calendarStateForDate,
   clearDateOverrides,
-  createCommandText,
   datesInRange,
-  extractCalendarFromConfig,
+  normalizeCalendarCriteria,
   removeDateValue,
   removePeriod,
   todayIso,
   toIsoDate,
 } from "./calendar-core.js";
+import { ONEDRIVE_CONFIG } from "./onedrive-config.js";
+import {
+  buildSharedCalendarPayload,
+  calendarFromSharedPayload,
+} from "./onedrive-core.js";
+import {
+  InteractiveAuthenticationRequired,
+  MicrosoftSession,
+  OneDriveCalendarStore,
+} from "./onedrive-sync.js";
 
-const FALLBACK_CONFIG = `# Lokal fallback dersom config/default-config.yaml ikke kan lastes.
-mail:
-  provider: graph
-graph:
-  tenant: consumers
-criteria:
-  allowed_locations:
-    - Moss
-  allowed_date_ranges:
-    - start: "2026-08-11"
-      end: "2026-12-31"
-      weekdays:
-        - monday
-        - tuesday
-        - wednesday
-        - thursday
-        - saturday
-  date_start: "2026-08-11"
-  date_end: "2026-12-31"
-  blocked_weekdays:
-    - friday
-    - sunday
-  extra_include_dates: []
-  exclude_dates: []
-`;
+const PENDING_ACTION_KEY = "shiftwatch.onedrive.pending-action";
+const EDITOR_SNAPSHOT_KEY = "shiftwatch.onedrive.editor-snapshot";
 
 const state = {
-  fullConfig: null,
   calendar: null,
   year: new Date().getFullYear(),
   selectionStart: null,
   selectionEnd: null,
   dirty: false,
+  remote: null,
+  cloudBusy: false,
+  cloudAction: null,
 };
 
+let microsoftSession = null;
+let oneDriveStore = null;
 const elements = {};
 const monthFormatter = new Intl.DateTimeFormat("nb-NO", { month: "long" });
 const longDateFormatter = new Intl.DateTimeFormat("nb-NO", {
@@ -58,16 +46,20 @@ const longDateFormatter = new Intl.DateTimeFormat("nb-NO", {
   month: "2-digit",
   year: "numeric",
 });
+const timestampFormatter = new Intl.DateTimeFormat("nb-NO", {
+  dateStyle: "medium",
+  timeStyle: "short",
+});
 
 document.addEventListener("DOMContentLoaded", initialize);
 
 function initialize() {
   for (const id of [
-    "config-input",
-    "insert-config",
-    "paste-config",
-    "load-repo-config",
-    "config-source",
+    "fetch-onedrive",
+    "publish-onedrive",
+    "disconnect-onedrive",
+    "connection-status",
+    "sync-details",
     "editor-section",
     "calendar-grid",
     "previous-year",
@@ -85,21 +77,15 @@ function initialize() {
     "exclude-list",
     "extra-count",
     "exclude-count",
-    "copy-section",
-    "copy-command",
-    "copy-full-config",
-    "subject-text",
     "status-message",
-    "command-fallback",
-    "command-output",
   ]) {
     elements[toCamel(id)] = document.getElementById(id);
   }
 
-  elements.subjectText.textContent = SUBJECT_TEXT;
   buildWeekdayOptions();
   bindEvents();
-  loadRepoConfig();
+  updateCloudControls();
+  initializeOneDrive();
 
   if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
     navigator.serviceWorker.register("service-worker.js").catch(() => {});
@@ -111,9 +97,9 @@ function toCamel(value) {
 }
 
 function bindEvents() {
-  elements.insertConfig.addEventListener("click", () => insertConfigFromText("innlimt config"));
-  elements.loadRepoConfig.addEventListener("click", loadRepoConfig);
-  elements.pasteConfig.addEventListener("click", pasteFromClipboard);
+  elements.fetchOnedrive.addEventListener("click", () => runCloudAction("fetch"));
+  elements.publishOnedrive.addEventListener("click", () => runCloudAction("publish"));
+  elements.disconnectOnedrive.addEventListener("click", disconnectOneDrive);
   elements.previousYear.addEventListener("click", () => changeYear(-1));
   elements.nextYear.addEventListener("click", () => changeYear(1));
   elements.clearSelection.addEventListener("click", clearSelection);
@@ -121,13 +107,269 @@ function bindEvents() {
   elements.addExact.addEventListener("click", includeSelectionExactly);
   elements.addExclusion.addEventListener("click", excludeSelection);
   elements.clearOverrides.addEventListener("click", clearSelectionOverrides);
-  elements.copyCommand.addEventListener("click", copyCommand);
-  elements.copyFullConfig.addEventListener("click", copyFullConfig);
   window.addEventListener("beforeunload", (event) => {
     if (!state.dirty) return;
     event.preventDefault();
     event.returnValue = "";
   });
+}
+
+async function initializeOneDrive() {
+  try {
+    microsoftSession = new MicrosoftSession(ONEDRIVE_CONFIG);
+    oneDriveStore = new OneDriveCalendarStore({
+      session: microsoftSession,
+      fileName: ONEDRIVE_CONFIG.fileName,
+    });
+    const result = await microsoftSession.initialize();
+    updateConnectionStatus();
+
+    const pendingAction = window.sessionStorage.getItem(PENDING_ACTION_KEY);
+    if (pendingAction && result.connected) {
+      window.sessionStorage.removeItem(PENDING_ACTION_KEY);
+      if (pendingAction === "publish") restoreEditorSnapshot();
+      await executeCloudAction(pendingAction);
+    }
+  } catch (error) {
+    updateConnectionStatus(false);
+    setStatus(friendlyError(error), "error");
+  }
+}
+
+async function runCloudAction(action) {
+  if (state.cloudBusy || !microsoftSession) return;
+  if (action === "fetch" && state.dirty) {
+    const replace = window.confirm(
+      "Du har upubliserte kalenderendringer. Vil du forkaste dem og hente siste OneDrive-versjon?",
+    );
+    if (!replace) return;
+  }
+  if (action === "publish" && !state.calendar) {
+    setStatus("Hent først siste kalender fra OneDrive.", "warning");
+    return;
+  }
+
+  if (!microsoftSession.isConnected()) {
+    await beginLoginForAction(action);
+    return;
+  }
+
+  try {
+    await executeCloudAction(action);
+  } catch (error) {
+    if (error instanceof InteractiveAuthenticationRequired) {
+      await beginLoginForAction(action);
+      return;
+    }
+    setStatus(friendlyError(error), "error");
+  }
+}
+
+async function beginLoginForAction(action) {
+  try {
+    if (action === "publish") persistEditorSnapshot();
+    window.sessionStorage.setItem(PENDING_ACTION_KEY, action);
+    setStatus("Åpner sikker Microsoft-innlogging …", "info");
+    await microsoftSession.beginLogin();
+  } catch (error) {
+    window.sessionStorage.removeItem(PENDING_ACTION_KEY);
+    setStatus(friendlyError(error), "error");
+  }
+}
+
+async function executeCloudAction(action) {
+  if (action === "fetch") return fetchRemoteCalendar();
+  if (action === "publish") return publishRemoteCalendar();
+  throw new Error("Ukjent OneDrive-handling");
+}
+
+async function fetchRemoteCalendar() {
+  setCloudBusy(true, "fetch");
+  try {
+    const { metadata, payload } = await oneDriveStore.download();
+    const calendar = calendarFromSharedPayload(payload);
+    state.remote = remoteState(metadata, payload);
+    activateCalendar(calendar);
+    state.dirty = false;
+    clearEditorSnapshot();
+    updateRemoteDetails();
+    updateConnectionStatus();
+    setStatus("Siste kalender ble hentet fra OneDrive og er klar for redigering.", "success");
+  } finally {
+    setCloudBusy(false);
+  }
+}
+
+async function publishRemoteCalendar() {
+  if (!state.remote) {
+    throw new Error("Hent siste OneDrive-kalender før du publiserer");
+  }
+  setCloudBusy(true, "publish");
+  try {
+    const currentMetadata = await oneDriveStore.getMetadata();
+    const loadedTag = String(state.remote.eTag ?? "");
+    const currentTag = String(currentMetadata?.eTag ?? "");
+    if (!currentMetadata) {
+      throw new Error("OneDrive-filen ble slettet etter at den ble hentet. Hent på nytt.");
+    }
+    if (loadedTag && currentTag && loadedTag !== currentTag) {
+      const overwrite = window.confirm(
+        "OneDrive-kalenderen er oppdatert av en annen agent etter at du hentet den. " +
+          "Trykk OK for å overskrive med kalenderen på skjermen, eller Avbryt for å hente på nytt.",
+      );
+      if (!overwrite) {
+        setStatus("Publisering avbrutt. Hent siste kalender før du fortsetter.", "warning");
+        return;
+      }
+    }
+
+    const payload = buildSharedCalendarPayload(state.calendar, {
+      sourceAgent: ONEDRIVE_CONFIG.sourceAgent,
+    });
+    const metadata = await oneDriveStore.upload(payload);
+    state.remote = remoteState(metadata, payload);
+    state.dirty = false;
+    clearEditorSnapshot();
+    updateRemoteDetails();
+    setStatus(
+      "Kalenderen er publisert til OneDrive. Kjørende agenter henter endringen automatisk.",
+      "success",
+    );
+  } finally {
+    setCloudBusy(false);
+  }
+}
+
+async function disconnectOneDrive() {
+  if (!microsoftSession || state.cloudBusy) return;
+  if (state.dirty) {
+    const disconnect = window.confirm(
+      "Du har upubliserte endringer. Vil du koble fra og forkaste dem?",
+    );
+    if (!disconnect) return;
+  }
+  window.sessionStorage.removeItem(PENDING_ACTION_KEY);
+  clearEditorSnapshot();
+  state.calendar = null;
+  state.remote = null;
+  state.dirty = false;
+  elements.editorSection.classList.add("is-disabled");
+  updateCloudControls();
+  setStatus("Kobler fra Microsoft …", "info");
+  try {
+    await microsoftSession.disconnect();
+  } catch (error) {
+    setStatus(friendlyError(error), "error");
+  }
+}
+
+function activateCalendar(calendar) {
+  state.calendar = normalizeCalendarCriteria(calendar);
+  state.year = preferredStartYear(state.calendar);
+  state.selectionStart = null;
+  state.selectionEnd = null;
+  elements.editorSection.classList.remove("is-disabled");
+  renderAll();
+  updateCloudControls();
+}
+
+function remoteState(metadata, payload) {
+  return {
+    id: String(metadata?.id ?? ""),
+    eTag: String(metadata?.eTag ?? ""),
+    lastModifiedDateTime: String(metadata?.lastModifiedDateTime ?? ""),
+    publishedAtUtc: String(payload?.published_at_utc ?? ""),
+    sourceAgent: String(payload?.source_agent ?? "Ukjent kilde"),
+  };
+}
+
+function updateConnectionStatus(forceConnected) {
+  const connected =
+    typeof forceConnected === "boolean"
+      ? forceConnected
+      : Boolean(microsoftSession?.isConnected());
+  elements.connectionStatus.textContent = connected ? "Tilkoblet Microsoft" : "Ikke tilkoblet";
+  elements.connectionStatus.classList.toggle("is-online", connected);
+  elements.connectionStatus.classList.toggle("is-offline", !connected);
+  elements.disconnectOnedrive.hidden = !connected;
+  updateCloudControls();
+}
+
+function updateRemoteDetails() {
+  if (!state.remote) {
+    elements.syncDetails.textContent = "Kalenderen er låst til siste OneDrive-versjon er hentet.";
+    return;
+  }
+  const published = formatTimestamp(state.remote.publishedAtUtc);
+  const modified = formatTimestamp(state.remote.lastModifiedDateTime);
+  elements.syncDetails.textContent = [
+    `Kilde: ${state.remote.sourceAgent}`,
+    published ? `publisert ${published}` : "",
+    modified ? `OneDrive oppdatert ${modified}` : "",
+    state.dirty ? "upubliserte endringer på denne enheten" : "synkronisert",
+  ]
+    .filter(Boolean)
+    .join(" • ");
+}
+
+function setCloudBusy(busy, action = null) {
+  state.cloudBusy = busy;
+  state.cloudAction = busy ? action : null;
+  elements.fetchOnedrive.textContent =
+    busy && action === "fetch" ? "Henter …" : "Hent siste kalender";
+  elements.publishOnedrive.textContent =
+    busy && action === "publish" ? "Publiserer …" : "Publiser kalender";
+  updateCloudControls();
+}
+
+function updateCloudControls() {
+  if (!elements.fetchOnedrive) return;
+  elements.fetchOnedrive.disabled = state.cloudBusy;
+  elements.publishOnedrive.disabled = state.cloudBusy || !state.calendar || !state.remote;
+  elements.disconnectOnedrive.disabled = state.cloudBusy;
+}
+
+function persistEditorSnapshot() {
+  if (!state.calendar) return;
+  window.sessionStorage.setItem(
+    EDITOR_SNAPSHOT_KEY,
+    JSON.stringify({ calendar: state.calendar, remote: state.remote, dirty: state.dirty }),
+  );
+}
+
+function restoreEditorSnapshot() {
+  const raw = window.sessionStorage.getItem(EDITOR_SNAPSHOT_KEY);
+  if (!raw) return;
+  try {
+    const snapshot = JSON.parse(raw);
+    state.remote = snapshot.remote ?? null;
+    activateCalendar(snapshot.calendar);
+    state.dirty = Boolean(snapshot.dirty);
+    updateRemoteDetails();
+  } catch (_error) {
+    clearEditorSnapshot();
+  }
+}
+
+function clearEditorSnapshot() {
+  window.sessionStorage.removeItem(EDITOR_SNAPSHOT_KEY);
+}
+
+function friendlyError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("AADSTS50011") || message.toLowerCase().includes("redirect")) {
+    return "Microsoft avviste returadressen. Legg den eksakte GitHub Pages-adressen inn som SPA redirect URI i appregistreringen.";
+  }
+  if (message.toLowerCase().includes("failed to fetch")) {
+    return "Kunne ikke kontakte Microsoft. Kontroller internettforbindelsen og prøv igjen.";
+  }
+  return message;
+}
+
+function formatTimestamp(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : timestampFormatter.format(date);
 }
 
 function buildWeekdayOptions() {
@@ -144,71 +386,11 @@ function buildWeekdayOptions() {
   }
 }
 
-async function loadRepoConfig() {
-  setStatus("Laster config fra repoet …", "info");
-  try {
-    const response = await fetch(`config/default-config.yaml?v=${Date.now()}`, {
-      cache: "no-store",
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    elements.configInput.value = await response.text();
-    insertConfigFromText("config/default-config.yaml");
-  } catch (_error) {
-    elements.configInput.value = FALLBACK_CONFIG;
-    insertConfigFromText("innebygd fallback-config");
-    setStatus(
-      "Repo-config kunne ikke lastes. En lokal fallback vises; dette er normalt ved direkte file://-åpning.",
-      "warning",
-    );
-  }
-}
-
-async function pasteFromClipboard() {
-  try {
-    elements.configInput.value = await navigator.clipboard.readText();
-    insertConfigFromText("utklippstavlen");
-  } catch (_error) {
-    setStatus("Nettleseren ga ikke tilgang til utklippstavlen. Lim inn manuelt i feltet.", "error");
-    elements.configInput.focus();
-  }
-}
-
-function parseConfigYaml(text) {
-  if (!globalThis.jsyaml) throw new Error("YAML-biblioteket kunne ikke lastes");
-  const parsed = globalThis.jsyaml.load(text, { schema: globalThis.jsyaml.JSON_SCHEMA });
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("Configen må være et YAML-objekt");
-  }
-  return parsed;
-}
-
-function insertConfigFromText(source) {
-  try {
-    const parsed = parseConfigYaml(elements.configInput.value);
-    state.fullConfig = parsed;
-    state.calendar = extractCalendarFromConfig(parsed);
-    state.year = preferredStartYear(state.calendar);
-    state.selectionStart = null;
-    state.selectionEnd = null;
-    state.dirty = false;
-    elements.configSource.textContent = `Aktiv kilde: ${source}`;
-    elements.editorSection.classList.remove("is-disabled");
-    elements.copySection.classList.remove("is-disabled");
-    elements.commandFallback.hidden = true;
-    renderAll();
-    setStatus("Config lest. Kalenderen er klar for redigering.", "success");
-  } catch (error) {
-    setStatus(error instanceof Error ? error.message : String(error), "error");
-  }
-}
-
 function preferredStartYear(calendar) {
   const currentYear = new Date().getFullYear();
   const today = todayIso();
   const candidates = calendar.allowed_date_ranges
-    .map((period) =>
-      period.end >= today && period.start < today ? today : period.start,
-    )
+    .map((period) => (period.end >= today && period.start < today ? today : period.start))
     .sort();
   return candidates.length > 0 ? Number(candidates[0].slice(0, 4)) : currentYear;
 }
@@ -400,6 +582,8 @@ function updateCalendar(calendar, message) {
   clearSelection();
   renderPeriodList();
   renderDateLists();
+  updateRemoteDetails();
+  updateCloudControls();
   setStatus(message, "success");
 }
 
@@ -470,64 +654,6 @@ function changeYear(delta) {
   document.querySelector(".calendar-card").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-async function copyCommand() {
-  if (!state.calendar) return;
-  try {
-    const command = await createCommandText(state.calendar);
-    const copied = await copyText(command);
-    elements.commandOutput.value = command;
-    elements.commandFallback.hidden = copied;
-    if (!copied) {
-      elements.commandOutput.focus();
-      elements.commandOutput.select();
-    }
-    state.dirty = false;
-    setStatus(
-      copied
-        ? `Kalenderkommando kopiert. Bruk tema «${SUBJECT_TEXT}».`
-        : "Automatisk kopiering ble blokkert. Kommandoen er markert for manuell kopiering.",
-      copied ? "success" : "warning",
-    );
-  } catch (error) {
-    setStatus(error.message, "error");
-  }
-}
-
-async function copyFullConfig() {
-  if (!state.calendar || !state.fullConfig) return;
-  try {
-    const updated = applyCalendarToConfig(state.fullConfig, state.calendar);
-    const yaml = globalThis.jsyaml.dump(updated, {
-      schema: globalThis.jsyaml.JSON_SCHEMA,
-      noRefs: true,
-      lineWidth: -1,
-      quotingType: '"',
-      forceQuotes: false,
-    });
-    const copied = await copyText(yaml);
-    state.fullConfig = updated;
-    elements.configInput.value = yaml;
-    state.dirty = false;
-    setStatus(
-      copied
-        ? "Oppdatert full config ble kopiert. YAML-kommentarer bevares ikke ved denne eksporten."
-        : "Kopiering ble blokkert. Den oppdaterte configen ligger nå i config-feltet.",
-      copied ? "success" : "warning",
-    );
-  } catch (error) {
-    setStatus(error.message, "error");
-  }
-}
-
-async function copyText(text) {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch (_error) {
-    return false;
-  }
-}
-
 function formatIso(value) {
   const [year, month, day] = value.split("-");
   return `${day}.${month}.${year}`;
@@ -540,5 +666,5 @@ function setStatus(message, type = "info") {
   elements.statusMessage.className = `status-message status-${type} is-visible`;
   statusTimer = window.setTimeout(() => {
     elements.statusMessage.classList.remove("is-visible");
-  }, type === "error" ? 9000 : 5500);
+  }, type === "error" ? 10000 : 6500);
 }

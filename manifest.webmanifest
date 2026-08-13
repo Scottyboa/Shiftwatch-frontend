@@ -1,7 +1,7 @@
 {
   "name": "ShiftWatch Kalender",
   "short_name": "SW Kalender",
-  "description": "Backend-fri kalendereditor for ShiftWatch.",
+  "description": "Responsiv OneDrive-kalendereditor for ShiftWatch.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

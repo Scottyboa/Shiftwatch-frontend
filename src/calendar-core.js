@@ -1,6 +1,3 @@
-export const SUBJECT_TEXT = "Shiftwatch changes";
-export const COMMAND_HEADER = "SHIFTWATCH-CALENDAR-COMMAND-V1";
-
 export const WEEKDAYS = [
   { key: "monday", short: "Man", long: "mandag" },
   { key: "tuesday", short: "Tir", long: "tirsdag" },
@@ -278,77 +275,4 @@ export function removeDateValue(calendar, field, value) {
   const next = cloneJson(calendar);
   next[field] = next[field].filter((item) => item !== value);
   return next;
-}
-
-function bytesToBase64Url(bytes) {
-  if (typeof btoa === "function") {
-    let binary = "";
-    for (const byte of bytes) binary += String.fromCharCode(byte);
-    return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
-  }
-  return Buffer.from(bytes).toString("base64url");
-}
-
-function base64UrlToBytes(value) {
-  if (typeof atob === "function") {
-    const standard = value.replaceAll("-", "+").replaceAll("_", "/");
-    const padded = standard + "=".repeat((4 - (standard.length % 4)) % 4);
-    return Uint8Array.from(atob(padded), (character) => character.charCodeAt(0));
-  }
-  return Uint8Array.from(Buffer.from(value, "base64url"));
-}
-
-async function sha256Hex(text) {
-  const digest = await globalThis.crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(text),
-  );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-export async function createCommandText(
-  calendar,
-  {
-    now = new Date(),
-    commandId = globalThis.crypto.randomUUID(),
-  } = {},
-) {
-  const normalized = normalizeCalendarCriteria(calendar);
-  const payload = {
-    schema_version: 1,
-    command: "replace_calendar",
-    command_id: commandId,
-    created_at_utc: now.toISOString(),
-    calendar_criteria: normalized,
-  };
-  const json = JSON.stringify(payload);
-  const encoded = bytesToBase64Url(new TextEncoder().encode(json));
-  const wrapped = encoded.match(/.{1,76}/gu)?.join("\n") ?? encoded;
-  const digest = await sha256Hex(json);
-  return [
-    COMMAND_HEADER,
-    "PAYLOAD-BEGIN",
-    wrapped,
-    "PAYLOAD-END",
-    `SHA256:${digest}`,
-  ].join("\n");
-}
-
-export async function decodeCommandText(commandText) {
-  const text = String(commandText).trim();
-  if (!text.startsWith(`${COMMAND_HEADER}\n`)) throw new Error("Ukjent kommandoformat");
-  const match = /PAYLOAD-BEGIN\s+([A-Za-z0-9_\-\s]+?)\s+PAYLOAD-END\s+SHA256:([a-f0-9]{64})/u.exec(text);
-  if (!match) throw new Error("Kommandoen mangler payload eller SHA256");
-  const encoded = match[1].replace(/\s+/gu, "");
-  const json = new TextDecoder().decode(base64UrlToBytes(encoded));
-  const actualDigest = await sha256Hex(json);
-  if (actualDigest !== match[2]) throw new Error("SHA256 stemmer ikke");
-  const payload = JSON.parse(json);
-  if (payload.schema_version !== 1 || payload.command !== "replace_calendar") {
-    throw new Error("Ugyldig kalenderkommando");
-  }
-  payload.calendar_criteria = normalizeCalendarCriteria(payload.calendar_criteria);
-  return payload;
 }

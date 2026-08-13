@@ -1,15 +1,15 @@
 {
   "name": "shiftwatch-calendar-web",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
-  "description": "Backend-free responsive calendar editor for ShiftWatch config files.",
+  "description": "Backend-free responsive OneDrive calendar editor for ShiftWatch.",
   "scripts": {
     "test": "node --test",
     "serve": "node scripts/serve.mjs"
   },
   "dependencies": {
-    "js-yaml": "4.3.1"
+    "@azure/msal-browser": "5.18.0"
   },
   "devDependencies": {
     "jsdom": "24.1.3"
