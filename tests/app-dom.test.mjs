@@ -107,6 +107,10 @@ test("the production page fetches, edits and publishes on the responsive OneDriv
   assert.equal(document.querySelector("#copy-section"), null);
   assert.equal(document.querySelector("#editor-section").classList.contains("is-disabled"), true);
   assert.equal(document.querySelector("#connection-status").textContent, "Tilkoblet Microsoft");
+  assert.equal(document.querySelector("#pause-all-agents").disabled, false);
+  assert.equal(document.querySelector("#resume-all-agents").disabled, false);
+  assert.equal(document.querySelector("#ping-agents").disabled, false);
+  assert.ok(document.querySelector("#agent-status-dialog"));
 
   document.querySelector("#fetch-onedrive").click();
   await new Promise((resolve) => setTimeout(resolve, 30));

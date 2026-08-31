@@ -147,6 +147,46 @@ test("OneDrive store downloads metadata/content and uploads through App Folder",
   assert.equal(calls[3].options.headers.get("Authorization"), "Bearer test-token");
 });
 
+test("OneDrive store lists and filters agent protocol files across Graph pages", async () => {
+  const calls = [];
+  const replies = [
+    new Response(JSON.stringify({ id: "app-root" }), { status: 200 }),
+    new Response(
+      JSON.stringify({
+        value: [
+          { id: "calendar", name: "shiftwatch_calendar_config.json" },
+          { id: "response-1", name: "shiftwatch_agent_ping_response_frontend_agent-a.json" },
+        ],
+        "@odata.nextLink": "https://graph.microsoft.com/v1.0/next-page",
+      }),
+      { status: 200 },
+    ),
+    new Response(
+      JSON.stringify({
+        value: [
+          { id: "response-2", name: "shiftwatch_agent_ping_response_frontend_agent-b.json" },
+        ],
+      }),
+      { status: 200 },
+    ),
+  ];
+  const store = new OneDriveCalendarStore({
+    session: { getAccessToken: async () => "token" },
+    fileName: "calendar.json",
+    fetchImpl: async (url, options = {}) => {
+      calls.push({ url: String(url), options });
+      return replies.shift();
+    },
+  });
+
+  const items = await store.listMetadata({
+    prefix: "shiftwatch_agent_ping_response_frontend_",
+  });
+  assert.deepEqual(items.map((item) => item.id), ["response-1", "response-2"]);
+  assert.match(calls[1].url, /\/children\?\$top=200/u);
+  assert.equal(calls[2].url, "https://graph.microsoft.com/v1.0/next-page");
+});
+
 test("vendored Microsoft authentication library exposes MSAL without a CDN", async () => {
   const source = await readFile(new URL("../vendor/msal-browser.min.js", import.meta.url), "utf8");
   const context = {

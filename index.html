@@ -70,11 +70,43 @@
         </div>
       </section>
 
+      <section id="agent-control-card" class="card agent-control-card" aria-labelledby="agent-control-title">
+        <div class="section-heading">
+          <div>
+            <span class="step">2</span>
+            <h2 id="agent-control-title">Agentkontroll</h2>
+          </div>
+          <span class="agent-control-badge">OneDrive-signal</span>
+        </div>
+        <p class="section-copy">
+          Send en kortlivet kommando til kjørende ShiftWatch-agenter, eller ping dem og se
+          svarene i et eget statusvindu. Agenter som ikke svarer kan være stoppet, frakoblet
+          eller midlertidig utilgjengelige.
+        </p>
+        <div class="button-row agent-control-actions">
+          <button id="pause-all-agents" class="button button-danger" type="button">
+            Pause alle agenter
+          </button>
+          <button id="resume-all-agents" class="button button-primary" type="button">
+            Gjenoppta alle
+          </button>
+          <button id="ping-agents" class="button button-blue" type="button">
+            Ping alle agenter
+          </button>
+          <button id="open-agent-status" class="button button-ghost" type="button" disabled>
+            Vis siste svar
+          </button>
+        </div>
+        <div id="agent-control-details" class="sync-details" aria-live="polite">
+          Koble til Microsoft for å styre eller pinge agenter.
+        </div>
+      </section>
+
       <section id="editor-section" class="editor-layout is-disabled" aria-labelledby="calendar-title">
         <div class="card calendar-card">
           <div class="section-heading calendar-heading">
             <div>
-              <span class="step">2</span>
+              <span class="step">3</span>
               <h2 id="calendar-title">Rediger kalender</h2>
             </div>
             <div class="year-controls" aria-label="Velg kalenderår">
@@ -146,8 +178,28 @@
       <div id="status-message" class="status-message" role="status" aria-live="polite"></div>
     </main>
 
+    <dialog id="agent-status-dialog" class="agent-status-dialog" aria-labelledby="agent-status-title">
+      <div class="dialog-heading">
+        <div>
+          <p class="eyebrow dialog-eyebrow">ShiftWatch</p>
+          <h2 id="agent-status-title">Svar fra agenter</h2>
+        </div>
+        <button id="close-agent-status" class="dialog-close" type="button" aria-label="Lukk statusvindu">×</button>
+      </div>
+      <p id="agent-status-summary" class="agent-status-summary" aria-live="polite">
+        Ingen ping er sendt i denne nettleserøkten.
+      </p>
+      <div id="agent-status-list" class="agent-status-list" aria-live="polite">
+        <div class="agent-empty-state">Ingen agentsvar ennå.</div>
+      </div>
+      <div class="dialog-actions">
+        <button id="clear-agent-status" class="button button-ghost" type="button">Tøm listen</button>
+        <button id="ping-agents-again" class="button button-blue" type="button">Ping på nytt</button>
+      </div>
+    </dialog>
+
     <footer>
-      Ingen backend. Kalenderdata sendes bare mellom nettleseren og din private OneDrive App Folder.
+      Ingen backend. Kalender- og agentsignaler sendes bare mellom nettleseren og din private OneDrive App Folder.
     </footer>
 
     <script src="vendor/msal-browser.min.js"></script>

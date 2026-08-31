@@ -1,7 +1,8 @@
 # ShiftWatch Kalender
 
-Versjon 2.0.1 inkluderer kompatibilitetsretting for Microsoft Graph-kall i
-Safari/WebKit på iPhone og nettverks-først oppdatering av appens lokale cache.
+Versjon 2.1.0 legger til frontend-basert agentkontroll via samme private
+OneDrive App Folder. Den beholder Safari/WebKit-rettingen og nettverks-først
+oppdatering av appens lokale cache fra 2.0.1.
 
 En statisk, responsiv kalendereditor som henter og publiserer ShiftWatch sine
 seks delte kalenderfelt direkte i OneDrive App Folder via Microsoft Graph.
@@ -14,6 +15,26 @@ Nettsiden har ingen backend og fungerer fra både PC og mobil.
    når nettleseren kommer tilbake til siden.
 3. Rediger perioder, eksakte inkluderinger og ekskluderte datoer.
 4. Trykk **Publiser kalender**.
+
+## Agentkontroll
+
+Etter Microsoft-innlogging kan frontenden også:
+
+- sende **Pause alle** og **Gjenoppta alle** til eksisterende ShiftWatch-agenter;
+- sende **Ping alle** og samle svar i et eget statusvindu i 20 sekunder;
+- vise agentnavn, stabil agent-ID og svartid;
+- vise individuelle **Pause**/**Gjenoppta**-knapper på hver agentrad.
+
+De tre globale handlingene bruker den eksisterende v109-protokollen og virker
+med dagens agentprogram. Dagens ping-svar inneholder ikke aktiv/pauset-status,
+så de vises som `Status ukjent`. Individuelle knapper er synlige, men deaktivert
+til agenten annonserer `targeted_control_v1`. Det gjør frontenden klar for den
+kommende, bakoverkompatible agentoppdateringen uten å sende ukjente kommandoer
+til eldre agenter.
+
+Ping bekrefter bare hvem som svarte. Manglende svar kan skyldes at PC-en eller
+agenten er stoppet, manglende nett, eller en midlertidig Graph-feil; frontenden
+betegner derfor ikke et manglende svar som sikkert «offline».
 
 Kjørende ShiftWatch-agenter plukker opp den overskrevne
 `shiftwatch_calendar_config.json`-filen ved neste OneDrive-poll. Senere

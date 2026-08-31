@@ -21,9 +21,11 @@ import {
   MicrosoftSession,
   OneDriveCalendarStore,
 } from "./onedrive-sync.js";
+import { FrontendAgentControl } from "./agent-control.js";
 
 const PENDING_ACTION_KEY = "shiftwatch.onedrive.pending-action";
 const EDITOR_SNAPSHOT_KEY = "shiftwatch.onedrive.editor-snapshot";
+const FRONTEND_AGENT_ID_KEY = "shiftwatch.agent-control.frontend-id";
 
 const state = {
   calendar: null,
@@ -34,10 +36,16 @@ const state = {
   remote: null,
   cloudBusy: false,
   cloudAction: null,
+  agentCommandBusy: false,
+  pingBusy: false,
+  latestPingId: null,
+  agentResponses: new Map(),
+  pendingTargets: new Set(),
 };
 
 let microsoftSession = null;
 let oneDriveStore = null;
+let agentControl = null;
 const elements = {};
 const monthFormatter = new Intl.DateTimeFormat("nb-NO", { month: "long" });
 const longDateFormatter = new Intl.DateTimeFormat("nb-NO", {
@@ -60,6 +68,18 @@ function initialize() {
     "disconnect-onedrive",
     "connection-status",
     "sync-details",
+    "agent-control-card",
+    "pause-all-agents",
+    "resume-all-agents",
+    "ping-agents",
+    "open-agent-status",
+    "agent-control-details",
+    "agent-status-dialog",
+    "agent-status-summary",
+    "agent-status-list",
+    "close-agent-status",
+    "clear-agent-status",
+    "ping-agents-again",
     "editor-section",
     "calendar-grid",
     "previous-year",
@@ -100,6 +120,16 @@ function bindEvents() {
   elements.fetchOnedrive.addEventListener("click", () => runCloudAction("fetch"));
   elements.publishOnedrive.addEventListener("click", () => runCloudAction("publish"));
   elements.disconnectOnedrive.addEventListener("click", disconnectOneDrive);
+  elements.pauseAllAgents.addEventListener("click", () => runAgentAction("pause"));
+  elements.resumeAllAgents.addEventListener("click", () => runAgentAction("resume"));
+  elements.pingAgents.addEventListener("click", () => runAgentAction("ping"));
+  elements.openAgentStatus.addEventListener("click", openAgentStatus);
+  elements.closeAgentStatus.addEventListener("click", closeAgentStatus);
+  elements.clearAgentStatus.addEventListener("click", clearAgentStatus);
+  elements.pingAgentsAgain.addEventListener("click", () => runAgentAction("ping"));
+  elements.agentStatusDialog.addEventListener("click", (event) => {
+    if (event.target === elements.agentStatusDialog) closeAgentStatus();
+  });
   elements.previousYear.addEventListener("click", () => changeYear(-1));
   elements.nextYear.addEventListener("click", () => changeYear(1));
   elements.clearSelection.addEventListener("click", clearSelection);
@@ -120,6 +150,11 @@ async function initializeOneDrive() {
     oneDriveStore = new OneDriveCalendarStore({
       session: microsoftSession,
       fileName: ONEDRIVE_CONFIG.fileName,
+    });
+    agentControl = new FrontendAgentControl({
+      store: oneDriveStore,
+      agentId: getFrontendAgentId(),
+      agentLabel: ONEDRIVE_CONFIG.sourceAgent,
     });
     const result = await microsoftSession.initialize();
     updateConnectionStatus();
@@ -165,6 +200,43 @@ async function runCloudAction(action) {
   }
 }
 
+async function runAgentAction(command) {
+  if (!microsoftSession || !agentControl || state.cloudBusy) return;
+  if (command === "ping" && state.pingBusy) {
+    openAgentStatus();
+    return;
+  }
+  if (command !== "ping" && state.agentCommandBusy) return;
+
+  if (command === "pause") {
+    const confirmed = window.confirm(
+      "Vil du sende PAUSE til alle andre kjørende ShiftWatch-agenter?",
+    );
+    if (!confirmed) return;
+  }
+  if (command === "resume") {
+    const confirmed = window.confirm(
+      "Vil du sende GJENOPPTA til alle andre kjørende ShiftWatch-agenter?",
+    );
+    if (!confirmed) return;
+  }
+
+  const action = `agent-${command}`;
+  if (!microsoftSession.isConnected()) {
+    await beginLoginForAction(action);
+    return;
+  }
+  try {
+    await executeCloudAction(action);
+  } catch (error) {
+    if (error instanceof InteractiveAuthenticationRequired) {
+      await beginLoginForAction(action);
+      return;
+    }
+    setStatus(friendlyError(error), "error");
+  }
+}
+
 async function beginLoginForAction(action) {
   try {
     if (action === "publish") persistEditorSnapshot();
@@ -180,6 +252,9 @@ async function beginLoginForAction(action) {
 async function executeCloudAction(action) {
   if (action === "fetch") return fetchRemoteCalendar();
   if (action === "publish") return publishRemoteCalendar();
+  if (action === "agent-pause") return broadcastAgentCommand("pause");
+  if (action === "agent-resume") return broadcastAgentCommand("resume");
+  if (action === "agent-ping") return pingAgents();
   throw new Error("Ukjent OneDrive-handling");
 }
 
@@ -240,8 +315,218 @@ async function publishRemoteCalendar() {
   }
 }
 
+async function broadcastAgentCommand(command) {
+  state.agentCommandBusy = true;
+  const isPause = command === "pause";
+  elements.agentControlDetails.textContent = isPause
+    ? "Sender pausekommando til alle agenter …"
+    : "Sender gjenoppta-kommando til alle agenter …";
+  updateCloudControls();
+  try {
+    await agentControl.sendBroadcast(command);
+    const text = isPause
+      ? "Pausekommando er publisert. Kjørende agenter bruker den normalt innen få sekunder."
+      : "Gjenoppta-kommando er publisert. Kjørende agenter bruker den normalt innen få sekunder.";
+    elements.agentControlDetails.textContent = text;
+    updateConnectionStatus();
+    setStatus(text, "success");
+  } finally {
+    state.agentCommandBusy = false;
+    updateCloudControls();
+  }
+}
+
+async function pingAgents() {
+  state.pingBusy = true;
+  state.latestPingId = null;
+  state.agentResponses.clear();
+  state.pendingTargets.clear();
+  elements.agentControlDetails.textContent = "Sender ping og venter på agentsvar …";
+  renderAgentStatus();
+  openAgentStatus();
+  updateCloudControls();
+  try {
+    const result = await agentControl.ping({
+      onResponse(response) {
+        state.agentResponses.set(response.agentId, response);
+        renderAgentStatus();
+      },
+      onProgress(progress) {
+        state.latestPingId = progress.pingId;
+        const seconds = Math.ceil(progress.remainingMs / 1000);
+        elements.agentControlDetails.textContent =
+          `Lytter etter agentsvar: ${progress.count} mottatt` +
+          (seconds > 0 ? ` • ${seconds} sekunder igjen` : "");
+        renderAgentStatus(progress.remainingMs);
+        updateAgentControls();
+      },
+    });
+    const count = result.responses.length;
+    const text =
+      count === 0
+        ? "Pingen er ferdig. Ingen agenter svarte i løpet av 20 sekunder."
+        : `Pingen er ferdig. ${count} agent${count === 1 ? "" : "er"} svarte.`;
+    elements.agentControlDetails.textContent = text;
+    setStatus(text, count > 0 ? "success" : "warning");
+  } finally {
+    state.pingBusy = false;
+    renderAgentStatus(0);
+    updateCloudControls();
+  }
+}
+
+async function sendTargetAgentCommand(agentId, command) {
+  const response = state.agentResponses.get(agentId);
+  if (!response?.supportsTargetedControl || state.pendingTargets.has(agentId)) return;
+  const verb = command === "pause" ? "pause" : "gjenoppta";
+  if (!window.confirm(`Vil du ${verb} bare ${response.label}?`)) return;
+
+  state.pendingTargets.add(agentId);
+  renderAgentStatus();
+  updateCloudControls();
+  try {
+    const result = await agentControl.sendTargetCommand(agentId, command);
+    if (!result.ack) {
+      setStatus(
+        `${response.label} bekreftet ikke kommandoen innen 15 sekunder.`,
+        "warning",
+      );
+      return;
+    }
+    state.agentResponses.set(agentId, {
+      ...response,
+      agentState: result.ack.agentState,
+      lastCommandAtUtc: result.ack.appliedAtUtc,
+    });
+    setStatus(
+      `${response.label} bekreftet ${command === "pause" ? "pause" : "gjenopptakelse"}.`,
+      "success",
+    );
+  } catch (error) {
+    setStatus(friendlyError(error), "error");
+  } finally {
+    state.pendingTargets.delete(agentId);
+    renderAgentStatus();
+    updateCloudControls();
+  }
+}
+
+function renderAgentStatus(remainingMs = null) {
+  if (!elements.agentStatusList) return;
+  const responses = [...state.agentResponses.values()].sort((left, right) =>
+    left.label.localeCompare(right.label, "nb-NO"),
+  );
+  if (!state.latestPingId) {
+    elements.agentStatusSummary.textContent = "Ingen ping er sendt i denne nettleserøkten.";
+  } else if (state.pingBusy) {
+    const seconds = Math.ceil(Math.max(0, remainingMs ?? 0) / 1000);
+    elements.agentStatusSummary.textContent =
+      `${responses.length} svar mottatt` + (seconds > 0 ? ` • ${seconds} sekunder igjen` : "");
+  } else {
+    elements.agentStatusSummary.textContent =
+      responses.length === 0
+        ? "Ingen agenter svarte på siste ping."
+        : `${responses.length} agent${responses.length === 1 ? "" : "er"} svarte på siste ping.`;
+  }
+
+  elements.agentStatusList.replaceChildren();
+  if (responses.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "agent-empty-state";
+    empty.textContent = state.pingBusy ? "Venter på svar …" : "Ingen agentsvar ennå.";
+    elements.agentStatusList.append(empty);
+    return;
+  }
+
+  for (const response of responses) {
+    const row = document.createElement("article");
+    row.className = "agent-status-row";
+
+    const identity = document.createElement("div");
+    identity.className = "agent-identity";
+    const name = document.createElement("strong");
+    name.textContent = response.label;
+    const id = document.createElement("code");
+    id.textContent = response.agentId;
+    identity.append(name, id);
+
+    const status = document.createElement("div");
+    status.className = "agent-response-state";
+    const badge = document.createElement("span");
+    badge.className = `agent-state-badge is-${response.agentState}`;
+    badge.textContent = agentStateLabel(response.agentState);
+    const timestamp = document.createElement("span");
+    timestamp.textContent = `Svarte ${formatTimestamp(response.respondedAtUtc) || response.respondedAtUtc}`;
+    status.append(badge, timestamp);
+
+    const actions = document.createElement("div");
+    actions.className = "agent-row-actions";
+    const targetBusy = state.pendingTargets.has(response.agentId);
+    for (const command of ["pause", "resume"]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `button ${command === "pause" ? "button-danger" : "button-primary"} button-small`;
+      button.textContent = targetBusy
+        ? "Venter …"
+        : command === "pause"
+          ? "Pause"
+          : "Gjenoppta";
+      button.disabled =
+        !response.supportsTargetedControl || targetBusy || state.cloudBusy || state.pingBusy;
+      button.title = response.supportsTargetedControl
+        ? `${command === "pause" ? "Pause" : "Gjenoppta"} bare ${response.label}`
+        : "Krever den kommende ShiftWatch-agentoppdateringen";
+      button.addEventListener("click", () => sendTargetAgentCommand(response.agentId, command));
+      actions.append(button);
+    }
+    if (!response.supportsTargetedControl) {
+      const note = document.createElement("small");
+      note.className = "agent-capability-note";
+      note.textContent = "Individuell styring krever ny agentversjon";
+      actions.append(note);
+    }
+    row.append(identity, status, actions);
+    elements.agentStatusList.append(row);
+  }
+}
+
+function agentStateLabel(value) {
+  return { active: "Aktiv", paused: "Pauset", unknown: "Status ukjent" }[value] ?? "Status ukjent";
+}
+
+function openAgentStatus() {
+  renderAgentStatus();
+  if (typeof elements.agentStatusDialog.showModal === "function") {
+    if (!elements.agentStatusDialog.open) elements.agentStatusDialog.showModal();
+  } else {
+    elements.agentStatusDialog.setAttribute("open", "");
+  }
+}
+
+function closeAgentStatus() {
+  if (typeof elements.agentStatusDialog.close === "function") {
+    if (elements.agentStatusDialog.open) elements.agentStatusDialog.close();
+  } else {
+    elements.agentStatusDialog.removeAttribute("open");
+  }
+}
+
+function clearAgentStatus() {
+  state.latestPingId = null;
+  state.agentResponses.clear();
+  state.pendingTargets.clear();
+  renderAgentStatus();
+  updateAgentControls();
+}
+
 async function disconnectOneDrive() {
-  if (!microsoftSession || state.cloudBusy) return;
+  if (
+    !microsoftSession ||
+    state.cloudBusy ||
+    state.agentCommandBusy ||
+    state.pingBusy ||
+    state.pendingTargets.size > 0
+  ) return;
   if (state.dirty) {
     const disconnect = window.confirm(
       "Du har upubliserte endringer. Vil du koble fra og forkaste dem?",
@@ -253,7 +538,11 @@ async function disconnectOneDrive() {
   state.calendar = null;
   state.remote = null;
   state.dirty = false;
+  state.latestPingId = null;
+  state.agentResponses.clear();
+  state.pendingTargets.clear();
   elements.editorSection.classList.add("is-disabled");
+  renderAgentStatus();
   updateCloudControls();
   setStatus("Kobler fra Microsoft …", "info");
   try {
@@ -292,6 +581,11 @@ function updateConnectionStatus(forceConnected) {
   elements.connectionStatus.classList.toggle("is-online", connected);
   elements.connectionStatus.classList.toggle("is-offline", !connected);
   elements.disconnectOnedrive.hidden = !connected;
+  if (elements.agentControlDetails && !state.pingBusy && !state.agentCommandBusy) {
+    elements.agentControlDetails.textContent = connected
+      ? "Klar. Ping viser alle agenter som svarer i løpet av 20 sekunder."
+      : "Koble til Microsoft for å styre eller pinge agenter.";
+  }
   updateCloudControls();
 }
 
@@ -326,7 +620,22 @@ function updateCloudControls() {
   if (!elements.fetchOnedrive) return;
   elements.fetchOnedrive.disabled = state.cloudBusy;
   elements.publishOnedrive.disabled = state.cloudBusy || !state.calendar || !state.remote;
-  elements.disconnectOnedrive.disabled = state.cloudBusy;
+  elements.disconnectOnedrive.disabled =
+    state.cloudBusy ||
+    state.agentCommandBusy ||
+    state.pingBusy ||
+    state.pendingTargets.size > 0;
+  updateAgentControls();
+}
+
+function updateAgentControls() {
+  if (!elements.pauseAllAgents) return;
+  const unavailable = !agentControl || state.cloudBusy;
+  elements.pauseAllAgents.disabled = unavailable || state.agentCommandBusy;
+  elements.resumeAllAgents.disabled = unavailable || state.agentCommandBusy;
+  elements.pingAgents.disabled = unavailable || state.pingBusy;
+  elements.pingAgentsAgain.disabled = unavailable || state.pingBusy;
+  elements.openAgentStatus.disabled = !state.latestPingId && state.agentResponses.size === 0;
 }
 
 function persistEditorSnapshot() {
@@ -353,6 +662,24 @@ function restoreEditorSnapshot() {
 
 function clearEditorSnapshot() {
   window.sessionStorage.removeItem(EDITOR_SNAPSHOT_KEY);
+}
+
+function getFrontendAgentId() {
+  try {
+    const existing = window.localStorage.getItem(FRONTEND_AGENT_ID_KEY);
+    if (existing) return existing;
+    const unique = globalThis.crypto?.randomUUID
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const created = `frontend-${unique}`;
+    window.localStorage.setItem(FRONTEND_AGENT_ID_KEY, created);
+    return created;
+  } catch (_error) {
+    const unique = globalThis.crypto?.randomUUID
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    return `frontend-${unique}`;
+  }
 }
 
 function friendlyError(error) {
