@@ -1,8 +1,43 @@
 # ShiftWatch Kalender
 
-Versjon 2.1.0 legger til frontend-basert agentkontroll via samme private
-OneDrive App Folder. Den beholder Safari/WebKit-rettingen og nettverks-først
-oppdatering av appens lokale cache fra 2.0.1.
+Versjon 2.2.0 viser dine kommende vakter med mørkeblått omriss i kalenderen.
+Bygger på GitHub main `12f9152ffa63e485b7fb8db6cf9505766e55d444` (kontrollert 05.09.2026).
+Beholder agentkontrollen fra 2.1.0 og Safari/WebKit-rettingen fra 2.0.1.
+
+## Mine vakter (nytt i 2.2.0)
+
+Etter **Hent siste kalender** vises først sist lagrede vaktoversikt fra OneDrive.
+Frontenden sender deretter en ping og velger én responderende agent som støtter
+vakthenting. Den agenten får en kortlivet forespørsel om å lese hele tabellen på
+**Mine kommende vakter**. Kalenderen kan redigeres og publiseres mens du venter.
+**Oppdater vakter** gjentar hentingen uten å laste inn kalenderkriteriene på nytt.
+
+- Mørkeblått indre omriss viser vaktdatoen. Fyllfargen for kriterier beholdes;
+  valgt dato har fremdeles lilla ytre markering.
+- Flere vakter samme dato gir et antallsmerke. Velg datoen eller et datointervall
+  for å se tid, type og arbeidssted under **Markering**. Detaljer finnes også i
+  datoens tooltip og skjermlesertekst.
+- Alle datoer i agentens resultat beholdes, også flere år fremover. Bruk
+  årspilene for å se dem. Nattvakter markeres på startdatoen slik den står på
+  nettstedet, med «til neste dag» i detaljene.
+- Sist hentet-tidspunkt vises alltid. Oversikter eldre enn ett døgn merkes.
+  Feil/timeout/ingen agent bevarer siste gyldige oversikt; bare et validert,
+  fullstendig tomt resultat fjerner alle vakter.
+- Vaktoversikten er separat fra kalenderkriteriene og endrer aldri claiming,
+  ekskluderinger eller det som sendes med **Publiser kalender**.
+- Ingen HTML, legevakt-passord eller sesjonscookies sendes til frontenden.
+  Vaktdata lagres av agenten i samme private OneDrive App Folder. Frontenden
+  holder den viste oversikten i minnet, og tømmer den ved frakobling.
+
+**Agentoppdatering kreves:** v110 støtter ikke `owned_shifts_v1`. Denne ZIP-en
+inneholder bare frontenden. Inntil agentdelen installeres vises en forklaring
+om at responderende agenter må oppdateres. Vanlig kalenderhenting og
+agentkontroll fungerer fortsatt. Ingen nye Azure-tillatelser er nødvendig.
+
+Den nøyaktige kontrakten for neste agentoppdatering finnes i
+[docs/owned-shifts-protocol.md](docs/owned-shifts-protocol.md).
+Nettstedets tabell er kilden; frontenden påstår ikke at en bestemt datoperiode
+er kontrollert hvis serveren ikke leverer den.
 
 En statisk, responsiv kalendereditor som henter og publiserer ShiftWatch sine
 seks delte kalenderfelt direkte i OneDrive App Folder via Microsoft Graph.
@@ -25,12 +60,10 @@ Etter Microsoft-innlogging kan frontenden også:
 - vise agentnavn, stabil agent-ID og svartid;
 - vise individuelle **Pause**/**Gjenoppta**-knapper på hver agentrad.
 
-De tre globale handlingene bruker den eksisterende v109-protokollen og virker
-med dagens agentprogram. Dagens ping-svar inneholder ikke aktiv/pauset-status,
-så de vises som `Status ukjent`. Individuelle knapper er synlige, men deaktivert
-til agenten annonserer `targeted_control_v1`. Det gjør frontenden klar for den
-kommende, bakoverkompatible agentoppdateringen uten å sende ukjente kommandoer
-til eldre agenter.
+De tre globale handlingene bruker den eksisterende v109-protokollen.
+Agent v110 viser aktiv/pauset-status og støtter individuelle knapper gjennom
+`targeted_control_v1`. Eldre agentsvar uten status vises som `Status ukjent`,
+og individuelle knapper er deaktivert hvis agenten mangler denne støtten.
 
 Ping bekrefter bare hvem som svarte. Manglende svar kan skyldes at PC-en eller
 agenten er stoppet, manglende nett, eller en midlertidig Graph-feil; frontenden

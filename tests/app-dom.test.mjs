@@ -96,6 +96,10 @@ test("the production page fetches, edits and publishes on the responsive OneDriv
   ];
   globalThis.fetch = async (url, options = {}) => {
     calls.push({ url: String(url), options });
+    if (String(url).includes("shiftwatch_owned_shifts.json")) return new Response("", { status: 404 });
+    if (options.body && JSON.parse(options.body).command === "ping") {
+      throw new Error("Agent discovery unavailable in this calendar regression test");
+    }
     return replies.shift();
   };
 
@@ -131,7 +135,7 @@ test("the production page fetches, edits and publishes on the responsive OneDriv
   document.querySelector("#publish-onedrive").click();
   await new Promise((resolve) => setTimeout(resolve, 30));
 
-  const uploadCall = calls.find((call) => call.options.method === "PUT");
+  const uploadCall = calls.find((call) => call.options.method === "PUT" && JSON.parse(call.options.body).calendar_criteria);
   assert.ok(uploadCall);
   const uploaded = JSON.parse(uploadCall.options.body);
   assert.equal(uploaded.schema_version, 1);

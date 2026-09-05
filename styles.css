@@ -710,6 +710,57 @@ code {
   box-shadow: 0 0 0 3px var(--selected);
 }
 
+.calendar-day.has-owned-shift,
+.calendar-day.has-owned-shift:hover:not(:disabled) {
+  box-shadow: inset 0 0 0 2.5px #123b78;
+}
+
+.calendar-day.has-owned-shift.is-selected,
+.calendar-day.has-owned-shift.is-selected:hover:not(:disabled) {
+  box-shadow: inset 0 0 0 2.5px #123b78, 0 0 0 3px var(--selected);
+}
+
+.calendar-day .owned-shift-count {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  padding: 0 3px;
+  border-radius: 4px;
+  background: #123b78;
+  color: white;
+  font-size: 9px;
+  line-height: 12px;
+}
+
+.legend-dot.owned-shift {
+  background: transparent;
+  border: 2.5px solid #123b78;
+}
+
+.owned-shifts-panel {
+  margin: 14px 0;
+  padding: 12px 14px;
+  border: 1px solid #c7d5e8;
+  border-radius: 12px;
+  background: #f4f7fb;
+  overflow-wrap: anywhere;
+}
+
+.owned-shifts-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.owned-shifts-heading h3 { margin: 0; color: #123b78; }
+.owned-shifts-panel p { margin: 7px 0 0; font-size: 0.85rem; }
+.owned-shifts-hint { color: #4b5c70; }
+.owned-shifts-selection { font-size: 0.85rem; overflow-wrap: anywhere; max-height: 240px; overflow-y: auto; }
+.owned-shift-detail { padding-left: 9px; border-left: 3px solid #123b78; }
+.owned-shift-detail strong, .owned-shift-detail span { display: block; }
+
 .calendar-day.is-today::after {
   position: absolute;
   right: 3px;

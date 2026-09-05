@@ -122,8 +122,18 @@
             <span><i class="legend-dot excluded"></i>Ekskludert</span>
             <span><i class="legend-dot past"></i>Fortid</span>
             <span><i class="legend-dot selected"></i>Markert</span>
+            <span><i class="legend-dot owned-shift"></i>Min vakt</span>
           </div>
 
+          <div class="owned-shifts-panel" aria-label="Mine kommende vakter">
+            <div class="owned-shifts-heading">
+              <h3>Mine vakter</h3>
+              <button id="refresh-owned-shifts" class="button button-ghost" type="button" disabled>Oppdater vakter</button>
+            </div>
+            <p id="owned-shifts-status" role="status">Hentes automatisk fra en kjørende agent etter kalenderhenting.</p>
+            <p id="owned-shifts-updated">Ingen vaktoversikt hentet ennå.</p>
+            <p class="owned-shifts-hint">Mørkeblått omriss viser en vakt du har. Kriteriefargen inni beholdes.</p>
+          </div>
           <p class="calendar-instruction">
             Trykk én dato for start og en ny dato for slutt. På mobil kan du bla nedover mellom månedene.
           </p>
@@ -134,6 +144,7 @@
           <section class="card selection-card">
             <h2>Markering</h2>
             <p id="selection-summary" class="selection-summary">Ingen datoer markert</p>
+            <div id="owned-shifts-selection" class="owned-shifts-selection" aria-live="polite">Velg en dato for å se vaktdetaljer.</div>
 
             <fieldset class="weekday-fieldset">
               <legend>Ukedager for ny periode</legend>
@@ -199,6 +210,7 @@
     </dialog>
 
     <footer>
+      ShiftWatch Frontend 2.2.0 ·
       Ingen backend. Kalender- og agentsignaler sendes bare mellom nettleseren og din private OneDrive App Folder.
     </footer>
 

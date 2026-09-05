@@ -22,6 +22,8 @@ import {
   OneDriveCalendarStore,
 } from "./onedrive-sync.js";
 import { FrontendAgentControl } from "./agent-control.js";
+import { FrontendOwnedShifts } from "./owned-shifts.js";
+import { OWNED_SHIFTS_CAPABILITY, shiftsByDate, shiftDescription } from "./owned-shifts-core.js";
 
 const PENDING_ACTION_KEY = "shiftwatch.onedrive.pending-action";
 const EDITOR_SNAPSHOT_KEY = "shiftwatch.onedrive.editor-snapshot";
@@ -41,11 +43,17 @@ const state = {
   latestPingId: null,
   agentResponses: new Map(),
   pendingTargets: new Set(),
+  shiftsBusy: false,
+  shiftsDiscovering: false,
+  shiftsSnapshot: null,
+  shiftsByDate: new Map(),
 };
 
 let microsoftSession = null;
 let oneDriveStore = null;
 let agentControl = null;
+let ownedShifts = null;
+let agentOperation = null;
 const elements = {};
 const monthFormatter = new Intl.DateTimeFormat("nb-NO", { month: "long" });
 const longDateFormatter = new Intl.DateTimeFormat("nb-NO", {
@@ -98,6 +106,10 @@ function initialize() {
     "extra-count",
     "exclude-count",
     "status-message",
+    "refresh-owned-shifts",
+    "owned-shifts-status",
+    "owned-shifts-updated",
+    "owned-shifts-selection",
   ]) {
     elements[toCamel(id)] = document.getElementById(id);
   }
@@ -117,6 +129,7 @@ function toCamel(value) {
 }
 
 function bindEvents() {
+  elements.refreshOwnedShifts.addEventListener("click", refreshOwnedShifts);
   elements.fetchOnedrive.addEventListener("click", () => runCloudAction("fetch"));
   elements.publishOnedrive.addEventListener("click", () => runCloudAction("publish"));
   elements.disconnectOnedrive.addEventListener("click", disconnectOneDrive);
@@ -155,6 +168,12 @@ async function initializeOneDrive() {
       store: oneDriveStore,
       agentId: getFrontendAgentId(),
       agentLabel: ONEDRIVE_CONFIG.sourceAgent,
+    });
+    ownedShifts = new FrontendOwnedShifts({
+      store: oneDriveStore,
+      requesterId: agentControl.agentId,
+      uuid: () => agentControl.uuid(),
+      discoverAgents: discoverShiftAgent,
     });
     const result = await microsoftSession.initialize();
     updateConnectionStatus();
@@ -201,7 +220,7 @@ async function runCloudAction(action) {
 }
 
 async function runAgentAction(command) {
-  if (!microsoftSession || !agentControl || state.cloudBusy) return;
+  if (!microsoftSession || !agentControl || state.cloudBusy || state.shiftsDiscovering) return;
   if (command === "ping" && state.pingBusy) {
     openAgentStatus();
     return;
@@ -252,9 +271,9 @@ async function beginLoginForAction(action) {
 async function executeCloudAction(action) {
   if (action === "fetch") return fetchRemoteCalendar();
   if (action === "publish") return publishRemoteCalendar();
-  if (action === "agent-pause") return broadcastAgentCommand("pause");
-  if (action === "agent-resume") return broadcastAgentCommand("resume");
-  if (action === "agent-ping") return pingAgents();
+  if (action === "agent-pause") return (agentOperation = broadcastAgentCommand("pause"));
+  if (action === "agent-resume") return (agentOperation = broadcastAgentCommand("resume"));
+  if (action === "agent-ping") return (agentOperation = pingAgents());
   throw new Error("Ukjent OneDrive-handling");
 }
 
@@ -270,8 +289,115 @@ async function fetchRemoteCalendar() {
     updateRemoteDetails();
     updateConnectionStatus();
     setStatus("Siste kalender ble hentet fra OneDrive og er klar for redigering.", "success");
+    // Fire independently: calendar editing/publishing never waits for a scan.
+    void refreshOwnedShifts();
   } finally {
     setCloudBusy(false);
+  }
+}
+
+async function discoverShiftAgent() {
+  state.shiftsDiscovering = true;
+  updateCloudControls();
+  try {
+    // Broadcast controls share one file. Let an existing manual operation finish
+    // before publishing discovery, and prevent another local broadcast meanwhile.
+    if (agentOperation) await agentOperation.catch(() => {});
+    return await agentControl.ping({
+      stopWhen: (agent) => agent.capabilities.includes(OWNED_SHIFTS_CAPABILITY),
+    });
+  } finally {
+    state.shiftsDiscovering = false;
+    updateCloudControls();
+  }
+}
+
+async function refreshOwnedShifts() {
+  if (!ownedShifts || !state.calendar || state.shiftsBusy || !microsoftSession?.isConnected()) return;
+  state.shiftsBusy = true;
+  updateCloudControls();
+  try {
+    await ownedShifts.refresh({
+      onSnapshot(snapshot) {
+        // A delayed saved file must not replace a newer overview already shown.
+        if (state.shiftsSnapshot && Date.parse(snapshot.fetched_at_utc) <
+            Date.parse(state.shiftsSnapshot.fetched_at_utc)) return;
+        state.shiftsSnapshot = snapshot;
+        state.shiftsByDate = shiftsByDate(snapshot);
+        renderOwnedShiftsUpdated();
+        renderCalendar();
+        renderOwnedShiftsSelection();
+      },
+      onStatus(status, label) {
+        const messages = {
+          cache: "Henter sist lagrede vaktoversikt …",
+          "cache-error": "Kunne ikke lese lagret oversikt. Forsøker ny henting …",
+          discovering: "Finner en kjørende agent som kan hente vaktene dine …",
+          fetching: `Venter på vaktoversikt fra ${label} … Du kan redigere kalenderen imens.`,
+          success: "Vaktoversikten er oppdatert fra legevakt.no.",
+          "upgrade-required": "Agentene som svarte må oppdateres før de kan hente dine vakter.",
+          "no-agent": "Ingen agent svarte. Start en oppdatert agent og trykk «Oppdater vakter».",
+          timeout: `Ingen ny vaktoversikt mottatt fra ${label} innen 90 sekunder.`,
+          "agent-error": `${label} kunne ikke hente en fullstendig vaktoversikt. Prøv igjen senere.`,
+        };
+        const failed = ["upgrade-required", "no-agent", "timeout", "agent-error"].includes(status);
+        elements.ownedShiftsStatus.textContent = messages[status] +
+          (failed && state.shiftsSnapshot ? " Siste hentede oversikt vises fortsatt." : "");
+        elements.ownedShiftsStatus.dataset.status = status;
+      },
+    });
+  } catch (error) {
+    elements.ownedShiftsStatus.dataset.status = "error";
+    elements.ownedShiftsStatus.textContent =
+      (error instanceof InteractiveAuthenticationRequired
+        ? "Microsoft-innloggingen må fornyes. Trykk «Hent siste kalender»."
+        : `Kunne ikke oppdatere vaktene: ${friendlyError(error)}`) +
+      (state.shiftsSnapshot ? " Siste hentede oversikt vises fortsatt." : "");
+  } finally {
+    state.shiftsBusy = false;
+    renderOwnedShiftsUpdated();
+    updateCloudControls();
+  }
+}
+
+function renderOwnedShiftsUpdated() {
+  const snapshot = state.shiftsSnapshot;
+  if (!snapshot) {
+    elements.ownedShiftsUpdated.textContent = "Ingen vaktoversikt hentet ennå.";
+    return;
+  }
+  const count = snapshot.shifts.filter((shift) => shift.date >= todayIso()).length;
+  const old = Date.now() - Date.parse(snapshot.fetched_at_utc) > 24 * 3600_000;
+  elements.ownedShiftsUpdated.textContent =
+    `${count} kommende vakt${count === 1 ? "" : "er"} i oversikten · Sist hentet ${formatTimestamp(snapshot.fetched_at_utc)}` +
+    (old ? " · Oversikten er over ett døgn gammel." : "");
+}
+
+function renderOwnedShiftsSelection() {
+  const container = elements.ownedShiftsSelection;
+  container.replaceChildren();
+  const start = state.selectionStart;
+  const end = state.selectionEnd ?? start;
+  if (!start) {
+    container.textContent = "Velg en dato i kalenderen for å se vaktdetaljer.";
+    return;
+  }
+  const shifts = (state.shiftsSnapshot?.shifts ?? []).filter((shift) => shift.date >= start && shift.date <= end);
+  if (!shifts.length) {
+    container.textContent = state.shiftsSnapshot
+      ? "Ingen vakter på valgte datoer i sist hentede oversikt."
+      : "Ingen vaktoversikt hentet ennå.";
+    return;
+  }
+  for (const shift of shifts) {
+    const row = document.createElement("p");
+    row.className = "owned-shift-detail";
+    const date = document.createElement("strong");
+    date.textContent = formatIso(shift.date);
+    const detail = document.createElement("span");
+    detail.textContent = shiftDescription(shift);
+    row.append(date, detail);
+    container.append(row);
   }
 }
 
@@ -525,6 +651,7 @@ async function disconnectOneDrive() {
     state.cloudBusy ||
     state.agentCommandBusy ||
     state.pingBusy ||
+    state.shiftsBusy ||
     state.pendingTargets.size > 0
   ) return;
   if (state.dirty) {
@@ -536,6 +663,12 @@ async function disconnectOneDrive() {
   window.sessionStorage.removeItem(PENDING_ACTION_KEY);
   clearEditorSnapshot();
   state.calendar = null;
+  state.shiftsSnapshot = null;
+  state.shiftsByDate.clear();
+  elements.calendarGrid.replaceChildren();
+  elements.ownedShiftsSelection.replaceChildren();
+  elements.ownedShiftsStatus.textContent = "Hentes automatisk etter kalenderhenting.";
+  renderOwnedShiftsUpdated();
   state.remote = null;
   state.dirty = false;
   state.latestPingId = null;
@@ -624,13 +757,16 @@ function updateCloudControls() {
     state.cloudBusy ||
     state.agentCommandBusy ||
     state.pingBusy ||
+    state.shiftsBusy ||
     state.pendingTargets.size > 0;
   updateAgentControls();
+  elements.refreshOwnedShifts.disabled = state.shiftsBusy || state.cloudBusy || !state.calendar;
+  elements.refreshOwnedShifts.textContent = state.shiftsBusy ? "Henter vakter …" : "Oppdater vakter";
 }
 
 function updateAgentControls() {
   if (!elements.pauseAllAgents) return;
-  const unavailable = !agentControl || state.cloudBusy;
+  const unavailable = !agentControl || state.cloudBusy || state.shiftsDiscovering;
   elements.pauseAllAgents.disabled = unavailable || state.agentCommandBusy;
   elements.resumeAllAgents.disabled = unavailable || state.agentCommandBusy;
   elements.pingAgents.disabled = unavailable || state.pingBusy;
@@ -775,6 +911,18 @@ function buildMonth(monthIndex) {
     button.textContent = String(day);
     button.dataset.date = iso;
     button.title = `${longDateFormatter.format(date)} – ${stateLabel(calendarState)}`;
+    const shifts = state.shiftsByDate.get(iso) ?? [];
+    if (shifts.length) {
+      button.classList.add("has-owned-shift");
+      button.title += ` – ${shifts.length} registrert(e) vakt(er): ${shifts.map(shiftDescription).join("; ")}`;
+      if (shifts.length > 1) {
+        const badge = document.createElement("span");
+        badge.className = "owned-shift-count";
+        badge.textContent = String(shifts.length);
+        badge.setAttribute("aria-hidden", "true");
+        button.append(badge);
+      }
+    }
     button.setAttribute("aria-label", button.title);
     if (iso === todayIso()) button.classList.add("is-today");
     if (isSelected(iso)) button.classList.add("is-selected");
@@ -828,6 +976,7 @@ function selectedDates({ requireRange = false } = {}) {
 }
 
 function renderSelectionSummary() {
+  renderOwnedShiftsSelection();
   if (!state.selectionStart) {
     elements.selectionSummary.textContent = "Ingen datoer markert";
     return;

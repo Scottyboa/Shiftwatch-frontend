@@ -144,6 +144,7 @@ export class OneDriveCalendarStore {
     const select = encodeURIComponent("id,name,eTag,lastModifiedDateTime,size");
     const response = await this.request(
       `${GRAPH_BASE}/me/drive/items/${encodeURIComponent(rootId)}:/${encodeURIComponent(resolvedFileName)}?$select=${select}`,
+      { cache: "no-store" },
     );
     if (response.status === 404) return null;
     if (!response.ok) throw await graphError(response);

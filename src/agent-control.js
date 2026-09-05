@@ -53,7 +53,7 @@ export class FrontendAgentControl {
     return { payload, metadata };
   }
 
-  async ping({ durationMs = 20_000, pollMs = 1_500, onResponse, onProgress } = {}) {
+  async ping({ durationMs = 20_000, pollMs = 1_500, onResponse, onProgress, stopWhen } = {}) {
     const { payload } = await this.sendBroadcast("ping");
     const deadline = Date.now() + Math.max(0, durationMs);
     const responsePrefix = pingResponsePrefix(this.agentId);
@@ -90,7 +90,7 @@ export class FrontendAgentControl {
         remainingMs: Math.max(0, remainingMs),
         count: responses.size,
       });
-      if (remainingMs <= 0) break;
+      if (remainingMs <= 0 || [...responses.values()].some((response) => stopWhen?.(response))) break;
       await this.sleep(Math.min(pollMs, remainingMs));
     }
     return { pingId: payload.command_id, responses: [...responses.values()] };
