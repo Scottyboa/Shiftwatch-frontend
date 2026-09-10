@@ -42,6 +42,7 @@ test("calendar fetch automatically discovers one agent, paints all years and kee
   const json = (data) => new Response(JSON.stringify(data));
   globalThis.fetch = async (raw, options = {}) => {
     const url = decodeURIComponent(String(raw));
+    if (url.includes("shiftwatch_weekly_upgrade_config.json")) return new Response("", { status: 404 });
     if (options.method === "PUT") {
       const p = JSON.parse(options.body); uploads.push(p);
       if (p.command === "ping") ping = p;

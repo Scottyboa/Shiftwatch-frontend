@@ -24,6 +24,10 @@ import {
 import { FrontendAgentControl } from "./agent-control.js";
 import { FrontendOwnedShifts } from "./owned-shifts.js";
 import { OWNED_SHIFTS_CAPABILITY, shiftsByDate, shiftDescription } from "./owned-shifts-core.js";
+import { FrontendWeeklyUpgrade } from "./weekly-upgrade.js";
+import { weekStart, weekLabel, weeksInSelection, normalizeWeeks, desiredUpgradeDays, shiftDate } from "./weekly-upgrade-core.js";
+import { FrontendSimpleLog } from "./simple-log.js";
+import { mergeSimpleEvents, simpleEventLines, shiftLogDescription } from "./simple-log-core.js";
 
 const PENDING_ACTION_KEY = "shiftwatch.onedrive.pending-action";
 const EDITOR_SNAPSHOT_KEY = "shiftwatch.onedrive.editor-snapshot";
@@ -47,6 +51,12 @@ const state = {
   shiftsDiscovering: false,
   shiftsSnapshot: null,
   shiftsByDate: new Map(),
+  weeklyWeeks: [],
+  weeklyRemote: null,
+  weeklyLoaded: false,
+  weeklyDirty: false,
+  logBusy: false,
+  logEvents: [],
 };
 
 let microsoftSession = null;
@@ -54,6 +64,9 @@ let oneDriveStore = null;
 let agentControl = null;
 let ownedShifts = null;
 let agentOperation = null;
+let weeklyUpgrade = null;
+let simpleLog = null;
+let logExpiryTimer = null;
 const elements = {};
 const monthFormatter = new Intl.DateTimeFormat("nb-NO", { month: "long" });
 const longDateFormatter = new Intl.DateTimeFormat("nb-NO", {
@@ -110,6 +123,14 @@ function initialize() {
     "owned-shifts-status",
     "owned-shifts-updated",
     "owned-shifts-selection",
+    "weekly-upgrade-toggle",
+    "weekly-selection-status",
+    "weekly-enabled-list",
+    "publish-weekly-upgrade",
+    "weekly-upgrade-status",
+    "refresh-simple-log",
+    "simple-log-status",
+    "simple-log-list",
   ]) {
     elements[toCamel(id)] = document.getElementById(id);
   }
@@ -129,6 +150,10 @@ function toCamel(value) {
 }
 
 function bindEvents() {
+  elements.weeklyUpgradeToggle.addEventListener("change", updateSelectedWeeks);
+  elements.publishWeeklyUpgrade.addEventListener("click", () => runCloudAction("publish-weekly"));
+  elements.refreshSimpleLog.addEventListener("click", refreshSimpleLog);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) renderSimpleLog(); });
   elements.refreshOwnedShifts.addEventListener("click", refreshOwnedShifts);
   elements.fetchOnedrive.addEventListener("click", () => runCloudAction("fetch"));
   elements.publishOnedrive.addEventListener("click", () => runCloudAction("publish"));
@@ -151,7 +176,7 @@ function bindEvents() {
   elements.addExclusion.addEventListener("click", excludeSelection);
   elements.clearOverrides.addEventListener("click", clearSelectionOverrides);
   window.addEventListener("beforeunload", (event) => {
-    if (!state.dirty) return;
+    if (!state.dirty && !state.weeklyDirty) return;
     event.preventDefault();
     event.returnValue = "";
   });
@@ -175,13 +200,15 @@ async function initializeOneDrive() {
       uuid: () => agentControl.uuid(),
       discoverAgents: discoverShiftAgent,
     });
+    weeklyUpgrade = new FrontendWeeklyUpgrade(oneDriveStore);
+    simpleLog = new FrontendSimpleLog(oneDriveStore);
     const result = await microsoftSession.initialize();
     updateConnectionStatus();
 
     const pendingAction = window.sessionStorage.getItem(PENDING_ACTION_KEY);
     if (pendingAction && result.connected) {
       window.sessionStorage.removeItem(PENDING_ACTION_KEY);
-      if (pendingAction === "publish") restoreEditorSnapshot();
+      if (["publish", "publish-weekly"].includes(pendingAction)) restoreEditorSnapshot();
       await executeCloudAction(pendingAction);
     }
   } catch (error) {
@@ -192,9 +219,9 @@ async function initializeOneDrive() {
 
 async function runCloudAction(action) {
   if (state.cloudBusy || !microsoftSession) return;
-  if (action === "fetch" && state.dirty) {
+  if (action === "fetch" && (state.dirty || state.weeklyDirty)) {
     const replace = window.confirm(
-      "Du har upubliserte kalenderendringer. Vil du forkaste dem og hente siste OneDrive-versjon?",
+      "Du har upubliserte kalender- eller ukevalg. Vil du forkaste dem og hente siste OneDrive-versjon?",
     );
     if (!replace) return;
   }
@@ -258,7 +285,7 @@ async function runAgentAction(command) {
 
 async function beginLoginForAction(action) {
   try {
-    if (action === "publish") persistEditorSnapshot();
+    if (["publish", "publish-weekly"].includes(action)) persistEditorSnapshot();
     window.sessionStorage.setItem(PENDING_ACTION_KEY, action);
     setStatus("Åpner sikker Microsoft-innlogging …", "info");
     await microsoftSession.beginLogin();
@@ -271,6 +298,7 @@ async function beginLoginForAction(action) {
 async function executeCloudAction(action) {
   if (action === "fetch") return fetchRemoteCalendar();
   if (action === "publish") return publishRemoteCalendar();
+  if (action === "publish-weekly") return publishWeeklyUpgrade();
   if (action === "agent-pause") return (agentOperation = broadcastAgentCommand("pause"));
   if (action === "agent-resume") return (agentOperation = broadcastAgentCommand("resume"));
   if (action === "agent-ping") return (agentOperation = pingAgents());
@@ -282,6 +310,10 @@ async function fetchRemoteCalendar() {
   try {
     const { metadata, payload } = await oneDriveStore.download();
     const calendar = calendarFromSharedPayload(payload);
+    state.weeklyLoaded = false;
+    state.weeklyDirty = false;
+    state.weeklyWeeks = [];
+    state.weeklyRemote = null;
     state.remote = remoteState(metadata, payload);
     activateCalendar(calendar);
     state.dirty = false;
@@ -291,9 +323,159 @@ async function fetchRemoteCalendar() {
     setStatus("Siste kalender ble hentet fra OneDrive og er klar for redigering.", "success");
     // Fire independently: calendar editing/publishing never waits for a scan.
     void refreshOwnedShifts();
+    void refreshSimpleLog();
+    await loadWeeklyUpgrade();
   } finally {
     setCloudBusy(false);
   }
+}
+
+async function loadWeeklyUpgrade() {
+  elements.weeklyUpgradeStatus.textContent = "Henter ukeprioritering …";
+  try {
+    const remote = await weeklyUpgrade.load();
+    state.weeklyWeeks = [...remote.weeks];
+    state.weeklyRemote = remote;
+    state.weeklyLoaded = true;
+    state.weeklyDirty = false;
+    updateWeeklyStatus();
+  } catch (error) {
+    state.weeklyLoaded = false;
+    elements.weeklyUpgradeStatus.textContent = `Ukevalg kunne ikke hentes: ${friendlyError(error)} Vanlig kalender kan fortsatt brukes.`;
+  }
+  renderWeeklyUpgrade();
+  renderCalendar();
+}
+
+function updateWeeklyStatus() {
+  const payload = state.weeklyRemote?.payload;
+  elements.weeklyUpgradeStatus.textContent = state.weeklyDirty
+    ? "Upubliserte ukevalg. Trykk «Publiser ukevalg» for å lagre dem til OneDrive."
+    : payload ? `Ukevalg synkronisert · ${payload.source_agent} · ${formatTimestamp(payload.published_at_utc)}`
+      : "Ingen ukeprioritering publisert. Funksjonen er av for alle uker.";
+}
+
+function renderWeeklyUpgrade() {
+  const selected = weeksInSelection(state.selectionStart, state.selectionEnd);
+  const active = new Set(state.weeklyWeeks);
+  const count = selected.filter((week) => active.has(week)).length;
+  elements.weeklyUpgradeToggle.checked = selected.length > 0 && count === selected.length;
+  elements.weeklyUpgradeToggle.indeterminate = count > 0 && count < selected.length;
+  elements.weeklyUpgradeToggle.disabled = !state.weeklyLoaded || !selected.length || state.cloudBusy;
+  elements.weeklySelectionStatus.textContent = !selected.length ? "Velg datoer i kalenderen."
+    : `${selected.length} uke(r) valgt · ${count} på · ${selected.map(weekLabel).join("; ")}`;
+  elements.weeklyEnabledList.replaceChildren();
+  if (!state.weeklyLoaded) {
+    elements.weeklyEnabledList.textContent = "Ukevalg er ikke lastet.";
+  } else if (!state.weeklyWeeks.length) {
+    elements.weeklyEnabledList.textContent = "Ingen uker aktivert.";
+  } else for (const week of state.weeklyWeeks) {
+    const row = document.createElement("div"); row.className = "weekly-week-row";
+    const body = document.createElement("div");
+    const title = document.createElement("strong"); title.textContent = weekLabel(week);
+    const dates = document.createElement("span"); dates.textContent = `${formatIso(week)}–${formatIso(shiftDate(week, 6))}`;
+    body.append(title, dates);
+    const allowed = desiredUpgradeDays(week, state.calendar, todayIso());
+    if (!allowed.length) {
+      const warning = document.createElement("span"); warning.className = "week-warning";
+      warning.textContent = shiftDate(week, 6) < todayIso() ? "Avsluttet uke" : "Ingen kommende torsdag/lørdag er ønsket i kalenderen.";
+      body.append(warning);
+    }
+    const remove = document.createElement("button"); remove.type = "button"; remove.className = "remove-button";
+    remove.textContent = "Slå av"; remove.disabled = state.cloudBusy;
+    remove.setAttribute("aria-label", `Slå av prioritering for ${weekLabel(week)}`);
+    remove.addEventListener("click", () => {
+      if (state.cloudBusy) return;
+      state.weeklyWeeks = state.weeklyWeeks.filter((value) => value !== week);
+      weeklyChanged();
+    });
+    row.append(body, remove); elements.weeklyEnabledList.append(row);
+  }
+  elements.publishWeeklyUpgrade.disabled = !state.weeklyLoaded || !state.weeklyDirty || state.cloudBusy;
+}
+
+function updateSelectedWeeks() {
+  if (!state.weeklyLoaded || state.cloudBusy) return;
+  const weeks = weeksInSelection(state.selectionStart, state.selectionEnd);
+  if (!weeks.length) return;
+  state.weeklyWeeks = elements.weeklyUpgradeToggle.checked
+    ? normalizeWeeks([...state.weeklyWeeks, ...weeks])
+    : state.weeklyWeeks.filter((week) => !weeks.includes(week));
+  weeklyChanged();
+}
+
+function weeklyChanged() {
+  state.weeklyDirty = JSON.stringify(state.weeklyWeeks) !== JSON.stringify(state.weeklyRemote?.weeks ?? []);
+  updateWeeklyStatus();
+  renderWeeklyUpgrade();
+  renderCalendar();
+  updateCloudControls();
+}
+
+async function publishWeeklyUpgrade() {
+  if (!state.weeklyLoaded || !state.weeklyRemote) throw new Error("Hent ukevalg før publisering");
+  if (!state.weeklyDirty) return;
+  setCloudBusy(true, "publish-weekly");
+  try {
+    const remote = await weeklyUpgrade.save([...state.weeklyWeeks], state.weeklyRemote.metadata);
+    state.weeklyRemote = remote;
+    state.weeklyDirty = false;
+    updateWeeklyStatus();
+    if (!state.dirty) clearEditorSnapshot();
+    setStatus("Ukevalget er publisert. Funksjonen tas i bruk av agenter med kommende oppdatering.", "success");
+  } finally { setCloudBusy(false); renderWeeklyUpgrade(); }
+}
+
+async function refreshSimpleLog() {
+  if (!simpleLog || !state.calendar || state.logBusy || !microsoftSession?.isConnected()) return;
+  state.logBusy = true;
+  elements.simpleLogStatus.textContent = "Henter enkel vaktlogg …";
+  updateCloudControls();
+  try {
+    const result = await simpleLog.load();
+    // Retain earlier positive results for still-present events, not deleted files.
+    const present = new Set(result.events.map((event) => event.event_id));
+    const previous = state.logEvents.filter((event) => present.has(event.event_id));
+    state.logEvents = mergeSimpleEvents([...previous, ...result.events]);
+    elements.simpleLogStatus.textContent = `Sist hentet ${formatTimestamp(new Date().toISOString())}.` +
+      (result.unreadable ? ` ${result.unreadable} loggfil(er) kunne ikke leses; visningen kan være ufullstendig.` : "") +
+      (result.cleanupFailed ? " Noen utløpte filer kunne ikke ryddes nå; de er skjult." : "");
+  } catch (error) {
+    elements.simpleLogStatus.textContent = `Kunne ikke hente loggen: ${friendlyError(error)} Siste hentede hendelser vises fortsatt.`;
+  } finally {
+    state.logBusy = false;
+    renderSimpleLog();
+    updateCloudControls();
+  }
+}
+
+function renderSimpleLog() {
+  window.clearTimeout(logExpiryTimer);
+  const now = Date.now();
+  state.logEvents = mergeSimpleEvents(state.logEvents, now);
+  elements.simpleLogList.replaceChildren();
+  if (!state.logEvents.length) {
+    const empty = document.createElement("p"); empty.className = "empty-state";
+    empty.textContent = state.calendar ? "Ingen tilgjengelige hendelser fra siste 48 timer. Logg skrives av kommende agentversjon."
+      : "Ingen logg hentet ennå.";
+    elements.simpleLogList.append(empty);
+  }
+  for (const event of state.logEvents) {
+    const article = document.createElement("article"); article.className = "simple-log-event";
+    const title = document.createElement("h4"); title.textContent = shiftLogDescription(event.shift);
+    const list = document.createElement("ol");
+    for (const line of simpleEventLines(event, now)) {
+      const li = document.createElement("li"); li.className = `log-${line.kind}`;
+      const time = document.createElement("time"); time.dateTime = line.at;
+      time.textContent = formatTimestamp(line.at);
+      const body = document.createElement("span"); body.textContent = line.text;
+      li.append(time, body); list.append(li);
+    }
+    article.append(title, list); elements.simpleLogList.append(article);
+  }
+  const upcoming = state.logEvents.flatMap((event) => [Date.parse(event.expires_at_utc), Date.parse(event.settle_after_utc)])
+    .filter((time) => time > now);
+  if (upcoming.length) logExpiryTimer = window.setTimeout(renderSimpleLog, Math.min(2147483647, Math.min(...upcoming) - now + 5));
 }
 
 async function discoverShiftAgent() {
@@ -430,7 +612,7 @@ async function publishRemoteCalendar() {
     const metadata = await oneDriveStore.upload(payload);
     state.remote = remoteState(metadata, payload);
     state.dirty = false;
-    clearEditorSnapshot();
+    if (!state.weeklyDirty) clearEditorSnapshot();
     updateRemoteDetails();
     setStatus(
       "Kalenderen er publisert til OneDrive. Kjørende agenter henter endringen automatisk.",
@@ -651,10 +833,10 @@ async function disconnectOneDrive() {
     state.cloudBusy ||
     state.agentCommandBusy ||
     state.pingBusy ||
-    state.shiftsBusy ||
+    state.shiftsBusy || state.logBusy ||
     state.pendingTargets.size > 0
   ) return;
-  if (state.dirty) {
+  if (state.dirty || state.weeklyDirty) {
     const disconnect = window.confirm(
       "Du har upubliserte endringer. Vil du koble fra og forkaste dem?",
     );
@@ -663,6 +845,16 @@ async function disconnectOneDrive() {
   window.sessionStorage.removeItem(PENDING_ACTION_KEY);
   clearEditorSnapshot();
   state.calendar = null;
+  state.weeklyWeeks = [];
+  state.weeklyRemote = null;
+  state.weeklyLoaded = false;
+  state.weeklyDirty = false;
+  state.logEvents = [];
+  simpleLog?.clear();
+  renderSimpleLog();
+  elements.simpleLogStatus.textContent = "Hentes sammen med kalenderen.";
+  elements.weeklyUpgradeStatus.textContent = "Ukevalg hentes sammen med kalenderen.";
+  renderWeeklyUpgrade();
   state.shiftsSnapshot = null;
   state.shiftsByDate.clear();
   elements.calendarGrid.replaceChildren();
@@ -757,11 +949,17 @@ function updateCloudControls() {
     state.cloudBusy ||
     state.agentCommandBusy ||
     state.pingBusy ||
-    state.shiftsBusy ||
+    state.shiftsBusy || state.logBusy ||
     state.pendingTargets.size > 0;
   updateAgentControls();
   elements.refreshOwnedShifts.disabled = state.shiftsBusy || state.cloudBusy || !state.calendar;
   elements.refreshOwnedShifts.textContent = state.shiftsBusy ? "Henter vakter …" : "Oppdater vakter";
+  elements.refreshSimpleLog.disabled = state.logBusy || state.cloudBusy || !state.calendar;
+  elements.refreshSimpleLog.textContent = state.logBusy ? "Henter logg …" : "Oppdater logg";
+  elements.publishWeeklyUpgrade.disabled = state.cloudBusy || !state.weeklyLoaded || !state.weeklyDirty;
+  elements.publishWeeklyUpgrade.textContent = state.cloudAction === "publish-weekly" ? "Publiserer …" : "Publiser ukevalg";
+  elements.editorSection.inert = state.cloudBusy;
+  elements.weeklyUpgradeToggle.disabled = !state.weeklyLoaded || !state.selectionStart || state.cloudBusy;
 }
 
 function updateAgentControls() {
@@ -778,7 +976,9 @@ function persistEditorSnapshot() {
   if (!state.calendar) return;
   window.sessionStorage.setItem(
     EDITOR_SNAPSHOT_KEY,
-    JSON.stringify({ calendar: state.calendar, remote: state.remote, dirty: state.dirty }),
+    JSON.stringify({ calendar: state.calendar, remote: state.remote, dirty: state.dirty,
+      weeklyWeeks: state.weeklyWeeks, weeklyRemote: state.weeklyRemote,
+      weeklyDirty: state.weeklyDirty, weeklyLoaded: state.weeklyLoaded }),
   );
 }
 
@@ -788,9 +988,14 @@ function restoreEditorSnapshot() {
   try {
     const snapshot = JSON.parse(raw);
     state.remote = snapshot.remote ?? null;
+    state.weeklyWeeks = normalizeWeeks(snapshot.weeklyWeeks ?? []);
+    state.weeklyRemote = snapshot.weeklyRemote ?? null;
+    state.weeklyLoaded = Boolean(snapshot.weeklyLoaded);
+    state.weeklyDirty = Boolean(snapshot.weeklyDirty);
     activateCalendar(snapshot.calendar);
     state.dirty = Boolean(snapshot.dirty);
     updateRemoteDetails();
+    updateWeeklyStatus();
   } catch (_error) {
     clearEditorSnapshot();
   }
@@ -865,6 +1070,7 @@ function renderAll() {
   renderSelectionSummary();
   renderPeriodList();
   renderDateLists();
+  renderWeeklyUpgrade();
 }
 
 function renderCalendar() {
@@ -911,6 +1117,10 @@ function buildMonth(monthIndex) {
     button.textContent = String(day);
     button.dataset.date = iso;
     button.title = `${longDateFormatter.format(date)} – ${stateLabel(calendarState)}`;
+    if (state.weeklyWeeks.includes(weekStart(iso))) {
+      button.classList.add("has-weekly-upgrade");
+      button.title += " – ukeprioritering på (vanlige kriterier gjelder)";
+    }
     const shifts = state.shiftsByDate.get(iso) ?? [];
     if (shifts.length) {
       button.classList.add("has-owned-shift");
@@ -948,6 +1158,7 @@ function stateLabel(value) {
 }
 
 function selectDate(iso) {
+  if (state.cloudBusy) return;
   if (!state.selectionStart || state.selectionEnd) {
     state.selectionStart = iso;
     state.selectionEnd = null;
@@ -976,6 +1187,7 @@ function selectedDates({ requireRange = false } = {}) {
 }
 
 function renderSelectionSummary() {
+  renderWeeklyUpgrade();
   renderOwnedShiftsSelection();
   if (!state.selectionStart) {
     elements.selectionSummary.textContent = "Ingen datoer markert";

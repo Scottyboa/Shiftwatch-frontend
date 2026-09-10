@@ -1,6 +1,6 @@
 // Bump this whenever app-shell JavaScript changes so installed/mobile clients
 // do not remain pinned to an older implementation.
-const CACHE_NAME = "shiftwatch-calendar-v5";
+const CACHE_NAME = "shiftwatch-calendar-v6";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -8,6 +8,10 @@ const APP_SHELL = [
   "./manifest.webmanifest",
   "./assets/icon.svg",
   "./src/app.js",
+  "./src/weekly-upgrade.js",
+  "./src/weekly-upgrade-core.js",
+  "./src/simple-log.js",
+  "./src/simple-log-core.js",
   "./src/agent-control.js",
   "./src/agent-control-core.js",
   "./src/owned-shifts.js",
