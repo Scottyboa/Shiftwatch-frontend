@@ -1,39 +1,8 @@
 # ShiftWatch Kalender
 
-Versjon **2.3.0** legger til ukevis vaktprioritering og enkel vaktlogg fra OneDrive.
-Bygger på det komplette v2.2.0-repoet og beholder kalender, Mine vakter,
-agentkontroll og Safari/WebKit-retting. Ingen endringer er publisert til GitHub.
-
-## Nytt i 2.3.0
-
-- **Prioriter vakt i valgte uker:** marker dato(er), huk av for de berørte ukene
-  og trykk **Publiser ukevalg**. Funksjonen er av som standard. Lørdag prioriteres
-  foran torsdag, deretter man/tir/ons. Vanlige kriterier gjelder fortsatt.
-- Et lite gyllent merke viser aktive uker uten å endre kriteriefarge eller
-  mørkeblått vaktomriss. Årsskifter håndteres med mandagsdato, ikke bare ukenummer.
-- **Enkel vaktlogg · siste 48 timer** ligger rett under kilde-/synkstatusen.
-  Hentes sammen med kalenderen eller med **Oppdater logg**. Viser match/nonmatch,
-  overtakelsesresultat og eventuelt annonseringsresultat, uten prosessloggen.
-- Rapporter om samme e-post samles til én hendelse. Én vellykket overtakelse
-  vises som suksess selv om andre agenter rapporterer feil.
-- Utløpte logglinjer skjules etter 48 timer. Gyldige utløpte loggfiler ryddes ved
-  henting, med versjonskontroll; ukjente filer røres ikke. Agentene vil også rydde.
-  Når alle programmer er avsluttet, venter fysisk rydding til neste kjøring.
-- Ukevalg og kalender publiseres separat for tydelig lagringsstatus. Begge hentes
-  med **Hent siste kalender**. Upubliserte valg varsles før henting/frakobling.
-- Ny service-worker-cacheversjon inkluderer alle nye moduler.
-
-**Viktig:** Denne utgivelsen inneholder bare frontend. v111.2 kan fortsatt hente
-Mine vakter og bruke eksisterende funksjoner, men ukeprioriteringen og skriving
-av enkel logg krever den kommende agentoppdateringen. Oppdater alle kjørende
-agenter før ukeprioriteringen brukes. Frontenden tar eller annonserer ingen vakter.
-
-Ny vakt skal tas først. Bare bekreftet overtakelse tillater annonsering av én
-lavere prioritert vakt fra samme uke. Feil ved annonsering skal ikke rulle tilbake
-den nye vakten. «Markert ledig» betyr annonsert, ikke at noen andre har overtatt.
-
-Agentkontrakt og eksempeldata:
-[docs/weekly-upgrade-and-log-protocol.md](docs/weekly-upgrade-and-log-protocol.md).
+Versjon 2.2.0 viser dine kommende vakter med mørkeblått omriss i kalenderen.
+Bygger på GitHub main `12f9152ffa63e485b7fb8db6cf9505766e55d444` (kontrollert 05.09.2026).
+Beholder agentkontrollen fra 2.1.0 og Safari/WebKit-rettingen fra 2.0.1.
 
 ## Mine vakter (nytt i 2.2.0)
 
@@ -60,9 +29,10 @@ vakthenting. Den agenten får en kortlivet forespørsel om å lese hele tabellen
   Vaktdata lagres av agenten i samme private OneDrive App Folder. Frontenden
   holder den viste oversikten i minnet, og tømmer den ved frakobling.
 
-**Agentstøtte:** v111.2 støtter Mine vakter. v110 og eldre støtter ikke
-`owned_shifts_v1` og trenger oppdatering for denne hentingen. Vanlig kalender
-og agentkontroll fungerer fortsatt. Ingen nye Azure-tillatelser etterspørres.
+**Agentoppdatering kreves:** v110 støtter ikke `owned_shifts_v1`. Denne ZIP-en
+inneholder bare frontenden. Inntil agentdelen installeres vises en forklaring
+om at responderende agenter må oppdateres. Vanlig kalenderhenting og
+agentkontroll fungerer fortsatt. Ingen nye Azure-tillatelser er nødvendig.
 
 Den nøyaktige kontrakten for neste agentoppdatering finnes i
 [docs/owned-shifts-protocol.md](docs/owned-shifts-protocol.md).

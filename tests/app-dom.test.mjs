@@ -96,8 +96,6 @@ test("the production page fetches, edits and publishes on the responsive OneDriv
   ];
   globalThis.fetch = async (url, options = {}) => {
     calls.push({ url: String(url), options });
-    if (String(url).includes("shiftwatch_weekly_upgrade_config.json")) return new Response("", { status: 404 });
-    if (String(url).includes("/children?")) return new Response(JSON.stringify({ value: [] }));
     if (String(url).includes("shiftwatch_owned_shifts.json")) return new Response("", { status: 404 });
     if (options.body && JSON.parse(options.body).command === "ping") {
       throw new Error("Agent discovery unavailable in this calendar regression test");
