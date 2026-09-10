@@ -68,6 +68,17 @@
         <div id="sync-details" class="sync-details" aria-live="polite">
           Kalenderen er låst til siste OneDrive-versjon er hentet.
         </div>
+        <section class="simple-log-panel" aria-labelledby="simple-log-title">
+          <div class="owned-shifts-heading">
+            <h3 id="simple-log-title">Enkel vaktlogg · siste 48 timer</h3>
+            <button id="refresh-simple-log" class="button button-ghost" type="button" disabled>Oppdater logg</button>
+          </div>
+          <p id="simple-log-status" role="status">Hentes sammen med kalenderen. Krever kommende agentoppdatering.</p>
+          <div id="simple-log-list" class="simple-log-list" aria-label="Vaktmeldinger og endelige resultater">
+            <p class="empty-state">Ingen logg hentet ennå.</p>
+          </div>
+          <p class="simple-log-hint">Én hendelse per e-post, også med flere agenter. Utløpte hendelser skjules etter 48 timer og ryddes ved neste henting eller av en kjørende oppdatert agent.</p>
+        </section>
       </section>
 
       <section id="agent-control-card" class="card agent-control-card" aria-labelledby="agent-control-title">
@@ -123,6 +134,7 @@
             <span><i class="legend-dot past"></i>Fortid</span>
             <span><i class="legend-dot selected"></i>Markert</span>
             <span><i class="legend-dot owned-shift"></i>Min vakt</span>
+            <span><i class="legend-dot weekly-upgrade"></i>Ukeprioritering</span>
           </div>
 
           <div class="owned-shifts-panel" aria-label="Mine kommende vakter">
@@ -141,6 +153,27 @@
         </div>
 
         <aside class="editor-sidebar">
+          <section class="card weekly-upgrade-card" aria-labelledby="weekly-upgrade-title">
+            <h2 id="weekly-upgrade-title">Prioriter vakt i valgte uker</h2>
+            <p class="weekly-priority">Lørdag → torsdag → man/tir/ons</p>
+            <p class="section-copy">Av som standard. Marker en dato eller et datospenn for å velge hele uker (mandag–søndag).</p>
+            <label class="weekly-toggle">
+              <input id="weekly-upgrade-toggle" type="checkbox" disabled />
+              <span>Aktiver for markerte uker</span>
+            </label>
+            <p id="weekly-selection-status" role="status">Velg datoer i kalenderen.</p>
+            <div id="weekly-enabled-list" class="weekly-enabled-list"></div>
+            <button id="publish-weekly-upgrade" class="button button-blue" type="button" disabled>Publiser ukevalg</button>
+            <p id="weekly-upgrade-status" role="status">Ukevalg hentes sammen med kalenderen.</p>
+            <details class="weekly-rules">
+              <summary>Regler og agentstøtte</summary>
+              <p>Vanlige kalender-, tids- og typekriterier gjelder alltid. Ekskluderte datoer tas ikke.</p>
+              <p>En ny, høyere prioritert vakt tas først. Bare etter bekreftet overtakelse forsøkes annonsering av én tidligere vakt med lavest prioritet i samme uke. Feiler annonseringen, beholdes den nye vakten og du får beskjed.</p>
+              <p>Fredag og søndag følger vanlige kriterier og inngår ikke i denne prioriteringsrekken. Lik eller lavere prioritet gir ingen erstatning.</p>
+              <p>«Markert ledig» betyr annonsert, ikke at noen andre har overtatt ansvaret.</p>
+              <p>Krever kommende agentoppdatering. Oppdater alle agenter før funksjonen brukes; eldre agenter kjenner ikke ukeprioriteringen.</p>
+            </details>
+          </section>
           <section class="card selection-card">
             <h2>Markering</h2>
             <p id="selection-summary" class="selection-summary">Ingen datoer markert</p>
@@ -210,7 +243,7 @@
     </dialog>
 
     <footer>
-      ShiftWatch Frontend 2.2.0 ·
+      ShiftWatch Frontend 2.3.1 ·
       Ingen backend. Kalender- og agentsignaler sendes bare mellom nettleseren og din private OneDrive App Folder.
     </footer>
 

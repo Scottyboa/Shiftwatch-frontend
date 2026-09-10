@@ -50,12 +50,13 @@ test("frontend loads policy/log, edits whole weeks without changing calendar, an
     ] };
   globalThis.fetch = async (raw, options = {}) => {
     const url = decodeURIComponent(String(raw));
-    if (options.method === "POST" && url.endsWith("/createUploadSession")) return Response.json({ uploadUrl: "https://upload.example.test/weekly" });
     if (options.method === "PUT") {
-      const payload = JSON.parse(typeof options.body === "string" ? options.body : new TextDecoder().decode(options.body));
+      const payload = JSON.parse(options.body);
       if (payload.command === "ping") throw new Error("Discovery unavailable in this fixture");
-      uploads.push(payload);
-      if (url.startsWith("https://upload.example.test/")) { remotePolicy = payload; policyTag = "policy-2"; return Response.json({ id: "policy", eTag: policyTag }); }
+      if (url.includes(WEEKLY_UPGRADE_FILE) || url.endsWith("/policy/content")) {
+        uploads.push(payload); remotePolicy = payload; policyTag = "policy-2";
+        return Response.json({ id: "policy", eTag: policyTag });
+      }
       return Response.json({ id: "calendar", eTag: "calendar-2" });
     }
     if (options.method === "DELETE") { deletions.push(url); return new Response(null, { status: 204 }); }

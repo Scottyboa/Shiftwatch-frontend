@@ -1,6 +1,6 @@
 # Weekly upgrade and simple log v1
 
-Frontend implementation: 2.3.0. Agent implementation: **not included in this release**.
+Frontend implementation: 2.3.1. Agent implementation: 112.1.
 No code in this frontend claims, advertises, or navigates to legevakt.no. The
 existing calendar (six shared fields), ping, targeted control and owned-shifts
 protocols remain unchanged. Store all new files in the existing OneDrive App Folder.
@@ -38,13 +38,12 @@ This avoids representing a partially successful two-file write as full success.
 Authentication redirect preserves both drafts and loaded version metadata in
 the existing tab's sessionStorage; published OneDrive files remain authoritative.
 
-Frontend checks current metadata then uses an upload session with If-Match for
-an existing file, and conflictBehavior=fail for a new file. Conflict or unknown
-upload outcome must not automatically retry with unconditional overwrite.
-The upload URL is pre-authorized and is never sent the Graph bearer token.
-See [Microsoft upload sessions](https://learn.microsoft.com/en-us/graph/api/driveitem-createuploadsession?view=graph-rest-1.0).
+Frontend checks current metadata, then uses a direct small-file content PUT with
+If-Match for an existing file and conflictBehavior=fail for a new file. Conflict
+or unknown upload outcome must not automatically retry with an unconditional
+overwrite. See [Microsoft small-file upload](https://learn.microsoft.com/en-us/graph/api/driveitem-put-content?view=graph-rest-1.0).
 
-### Required agent behavior for the next update
+### Required agent behavior (implemented in v112.1)
 
 1. Apply ALL existing calendar/time/type/location criteria first. An excluded
    Saturday or Thursday is never claimed because a week is enabled. Frontend
@@ -182,13 +181,13 @@ Graph DELETE moves files to the recycle bin, not permanent erasure:
 
 ## Rollout and verification
 
-Frontend can be installed first; missing policy means off and missing log means
-empty. v111.2 keeps calendar, owned-shifts fetch and agent control working but
-does not implement weekly upgrades or write this log. No broader Microsoft scope
-is requested. Ship the next agent ZIP separately. Do not exercise real claim or
-advertisement actions as a frontend smoke test.
+Missing policy means off and missing log means empty. v111.2 and older keep
+calendar, owned-shifts fetch and agent control working but do not implement
+weekly upgrades or write this log. Agent v112.1 implements the protocol. No
+broader Microsoft scope is requested. Do not exercise real claim or advertisement
+actions as a frontend smoke test.
 
 Tests cover weeks spanning New Year, disabled/default policy, exclusion precedence,
-unknown formats, concurrent settings conflicts, no bearer token on upload URLs,
+unknown formats, concurrent settings conflicts, guarded direct small-file writes,
 winner/loser aggregation, skips/nonmatches, pending results, advertiser outcome,
 48h expiry, safe cleanup and existing calendar/control/owned-shifts regressions.

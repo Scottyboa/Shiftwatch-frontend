@@ -97,7 +97,9 @@ async function graphError(response) {
   } catch (_error) {
     // Graph returnerer ikke alltid JSON ved nettverks-/proxyfeil.
   }
-  return new Error(`Microsoft Graph svarte HTTP ${response.status}${detail}`);
+  const error = new Error(`Microsoft Graph svarte HTTP ${response.status}${detail}`);
+  error.status = response.status;
+  return error;
 }
 
 export class OneDriveCalendarStore {
@@ -199,6 +201,41 @@ export class OneDriveCalendarStore {
 
   async upload(payload) {
     return this.uploadJson(payload, this.fileName);
+  }
+
+  async deleteJsonItem(itemId, eTag) {
+    if (!itemId || !eTag) throw new Error("Sletting krever fil-ID og versjon");
+    const response = await this.request(`${GRAPH_BASE}/me/drive/items/${encodeURIComponent(itemId)}`, {
+      method: "DELETE", headers: { "If-Match": eTag },
+    });
+    if (response.status === 404) return;
+    if (!response.ok) throw await graphError(response);
+  }
+
+  // Weekly settings are a tiny JSON file. Use the normal Graph content PUT
+  // instead of an upload session, while retaining optimistic concurrency.
+  async uploadJsonGuarded(payload, fileName, expectedMetadata) {
+    if (!fileName || /[\\/]/u.test(fileName)) throw new Error("Ugyldig filnavn");
+    if (expectedMetadata && (!expectedMetadata.id || !expectedMetadata.eTag)) {
+      throw new Error("OneDrive mangler versjon for ukevalget. Hent siste kalender på nytt.");
+    }
+    const root = await this.getAppRootId();
+    const path = expectedMetadata
+      ? `${GRAPH_BASE}/me/drive/items/${encodeURIComponent(expectedMetadata.id)}/content`
+      : `${GRAPH_BASE}/me/drive/items/${encodeURIComponent(root)}:/${encodeURIComponent(fileName)}:/content?%40microsoft.graph.conflictBehavior=fail`;
+    const response = await this.request(path, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        ...(expectedMetadata ? { "If-Match": expectedMetadata.eTag } : {}),
+      },
+      body: JSON.stringify(payload, null, 2),
+    });
+    if ([404, 409, 412].includes(response.status)) {
+      throw new Error("Ukevalget ble endret av en annen enhet. Hent siste kalender på nytt.");
+    }
+    if (!response.ok) throw await graphError(response);
+    return response.json();
   }
 
   async uploadJson(payload, fileName) {

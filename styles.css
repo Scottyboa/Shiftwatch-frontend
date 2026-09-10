@@ -1125,3 +1125,41 @@ footer {
     transition-duration: 0.01ms !important;
   }
 }
+/* Weekly policy is a separate marker: it never replaces criterion fills or owned-shift borders. */
+.weekly-upgrade-card { padding: 18px; min-width: 0; }
+.weekly-upgrade-card h2 { margin-top: 0; }
+.weekly-priority { font-weight: 700; color: #694314; }
+.weekly-toggle { display: flex; align-items: center; gap: .65rem; font-weight: 600; cursor: pointer; }
+.weekly-toggle input { width: 1.2rem; height: 1.2rem; accent-color: #8c580d; flex-shrink: 0; }
+.weekly-enabled-list { display: grid; gap: .5rem; margin: .85rem 0; max-height: 16rem; overflow-y: auto; }
+.weekly-week-row { display: flex; gap: .6rem; align-items: start; justify-content: space-between; border: 1px solid #d8c09b; border-radius: 8px; padding: .65rem; }
+.weekly-week-row span { display: block; font-size: .875rem; }
+.weekly-week-row .week-warning { color: #8c4400; margin-top: .3rem; }
+.weekly-rules { margin-top: 1rem; font-size: .875rem; }
+.weekly-rules p { line-height: 1.5; }
+#weekly-upgrade-status, #weekly-selection-status { font-size: .875rem; overflow-wrap: anywhere; }
+.calendar-day.has-weekly-upgrade { position: relative; }
+.calendar-day.has-weekly-upgrade::before { content: ""; position: absolute; bottom: 4px; left: calc(50% - 5px); width: 10px; height: 3px; border-radius: 2px; background: #8c580d; pointer-events: none; }
+.legend-dot.weekly-upgrade { background: #8c580d; height: 4px; border-radius: 2px; }
+.simple-log-panel { border-top: 1px solid #dce4ec; margin-top: 1.25rem; padding-top: 1rem; }
+.simple-log-list { max-height: 23rem; overflow-y: auto; overscroll-behavior: contain; }
+.simple-log-event { padding: .85rem 0; border-bottom: 1px solid #e0e6eb; overflow-wrap: anywhere; }
+.simple-log-event h4 { margin: 0 0 .5rem; font-size: .95rem; }
+.simple-log-event ol { list-style: none; padding: 0; margin: 0; display: grid; gap: .4rem; }
+.simple-log-event li { display: flex; gap: .65rem; font-size: .875rem; align-items: baseline; }
+.simple-log-event time { color: #536477; flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+.simple-log-event .log-success { color: #16633a; }
+.simple-log-event .log-failure { color: #a42828; }
+.simple-log-event .log-pending { color: #80520c; }
+.simple-log-hint, #simple-log-status { color: #536477; font-size: .875rem; line-height: 1.5; }
+@media (min-width: 901px) {
+  .editor-sidebar { max-height: calc(100vh - 116px); overflow-y: auto; scrollbar-gutter: stable; }
+}
+@media (max-width: 900px) {
+  .weekly-upgrade-card { grid-column: 1 / -1; }
+}
+@media (max-width: 640px) {
+  .simple-log-panel .owned-shifts-heading { align-items: flex-start; flex-wrap: wrap; gap: .5rem; }
+  .simple-log-event li { display: block; }
+  .simple-log-event time { display: inline-block; margin-right: .5rem; }
+}

@@ -47,25 +47,28 @@ test("missing remote policy is off; malformed/changed policy is not overwritten"
   assert.equal(writes, 0);
 });
 
-test("guarded publish uses eTag, byte length and an upload URL without a bearer token", async () => {
+test("guarded publish uses a direct small-file PUT with eTag or create-only conflict protection", async () => {
   const calls = [];
   const store = new OneDriveCalendarStore({ session: { getAccessToken: async () => "fake" },
     fetchImpl: async (url, options) => {
       calls.push({ url, options });
       if (url.endsWith("/approot")) return Response.json({ id: "root" });
-      if (url.endsWith("/createUploadSession")) return Response.json({ uploadUrl: "https://upload.example.test/session" });
       return Response.json({ id: "policy", eTag: "updated" });
     } });
   const payload = buildWeeklyUpgrade(["2026-09-14"], { source: "Øvingsagent" });
   await store.uploadJsonGuarded(payload, WEEKLY_UPGRADE_FILE, { id: "policy", eTag: '"old"' });
   assert.equal(calls[1].options.headers.get("If-Match"), '"old"');
   assert.equal(calls[1].options.headers.get("Authorization"), "Bearer fake");
-  assert.equal(new Headers(calls[2].options.headers).has("Authorization"), false);
-  assert.deepEqual(JSON.parse(new TextDecoder().decode(calls[2].options.body)), payload);
-  assert.equal(calls[2].options.headers["Content-Range"], `bytes 0-${calls[2].options.body.length - 1}/${calls[2].options.body.length}`);
+  assert.equal(calls[1].options.method, "PUT");
+  assert.match(calls[1].url, /\/items\/policy\/content$/u);
+  assert.deepEqual(JSON.parse(calls[1].options.body), payload);
   calls.length = 0;
   await store.uploadJsonGuarded(payload, WEEKLY_UPGRADE_FILE, null);
-  assert.equal(JSON.parse(calls[0].options.body).item["@microsoft.graph.conflictBehavior"], "fail");
+  assert.equal(calls[0].options.method, "PUT");
+  assert.deepEqual(JSON.parse(calls[0].options.body), payload);
+  const createUrl = new URL(calls[0].url);
+  assert.match(createUrl.pathname, /\/items\/root:\/shiftwatch_weekly_upgrade_config\.json:\/content$/u);
+  assert.equal(createUrl.searchParams.get("@microsoft.graph.conflictBehavior"), "fail");
 });
 
 test("conditional publish conflicts and cleanup races are reported without unsafe fallback", async () => {
@@ -77,4 +80,21 @@ test("conditional publish conflicts and cleanup races are reported without unsaf
   assert.equal(calls.length, 1);
   await assert.rejects(store.deleteJsonItem("expired", "version"), (error) => error.status === 412);
   assert.equal(calls[1].options.headers.get("If-Match"), "version");
+});
+
+test("malformed Graph response is surfaced without retrying through an upload session", async () => {
+  const calls = [];
+  const store = new OneDriveCalendarStore({ session: { getAccessToken: async () => "fake" },
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return Response.json({ error: { code: "invalidRequest", message: "The request is malformed or incorrect." } }, { status: 400 });
+    } });
+  store.appRootId = "root";
+  await assert.rejects(
+    store.uploadJsonGuarded(buildWeeklyUpgrade(["2026-09-14"]), WEEKLY_UPGRADE_FILE, null),
+    (error) => error.status === 400 && /malformed or incorrect/u.test(error.message),
+  );
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].options.method, "PUT");
+  assert.doesNotMatch(calls[0].url, /createUploadSession/u);
 });
