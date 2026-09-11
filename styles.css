@@ -420,6 +420,19 @@ code {
   background: #fff7e6;
 }
 
+.agent-state-badge.is-stopping,
+.agent-state-badge.is-exiting {
+  border-color: #d7ab58;
+  color: #6d4b0c;
+  background: #fff7e6;
+}
+
+.agent-state-badge.is-stopped {
+  border-color: #cbd4da;
+  color: #5f6d78;
+  background: #f0f3f5;
+}
+
 .agent-state-badge.is-unknown {
   border-color: #cbd4da;
   color: #5f6d78;
@@ -428,9 +441,20 @@ code {
 
 .agent-row-actions {
   display: grid;
-  grid-template-columns: repeat(2, minmax(86px, 1fr));
+  grid-template-columns: repeat(3, minmax(78px, 1fr));
   align-items: center;
   gap: 6px;
+}
+
+.button-stop {
+  border-color: #7c3035;
+  color: #fff;
+  background: #7c3035;
+}
+
+.button-stop:hover:not(:disabled) {
+  border-color: #602126;
+  background: #602126;
 }
 
 .button-small {
@@ -463,6 +487,60 @@ code {
   border-top: 1px solid var(--soft-line);
   background: #f8fafb;
   gap: 8px;
+}
+
+.agent-stop-dialog {
+  width: min(510px, calc(100vw - 28px));
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: 0 28px 80px rgb(10 29 46 / 28%);
+}
+
+.agent-stop-dialog::backdrop {
+  background: rgb(10 29 46 / 58%);
+  backdrop-filter: blur(2px);
+}
+
+.agent-stop-content {
+  padding: 20px;
+}
+
+.agent-stop-content > p {
+  margin: 0;
+}
+
+.agent-stop-hint {
+  margin-top: 7px !important;
+  color: #667580;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.agent-stop-actions {
+  display: grid;
+  margin-top: 18px;
+  gap: 9px;
+}
+
+.agent-stop-actions .button {
+  min-height: 48px;
+}
+
+.agent-stop-actions .button:not(#cancel-agent-stop) {
+  display: grid;
+  justify-items: start;
+  text-align: left;
+  gap: 3px;
+}
+
+.agent-stop-actions small {
+  font-size: 0.67rem;
+  font-weight: 500;
+  opacity: 0.86;
 }
 
 .connection-status::before {
@@ -1074,7 +1152,12 @@ footer {
   }
 
   .agent-row-actions {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .agent-stop-dialog {
+    width: calc(100vw - 18px);
+    border-radius: 14px;
   }
 
   .dialog-actions {

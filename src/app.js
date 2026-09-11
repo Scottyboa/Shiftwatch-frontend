@@ -22,6 +22,7 @@ import {
   OneDriveCalendarStore,
 } from "./onedrive-sync.js";
 import { FrontendAgentControl } from "./agent-control.js";
+import { targetCommandAvailable } from "./agent-control-core.js";
 import { FrontendOwnedShifts } from "./owned-shifts.js";
 import { OWNED_SHIFTS_CAPABILITY, shiftsByDate, shiftDescription } from "./owned-shifts-core.js";
 import { FrontendWeeklyUpgrade } from "./weekly-upgrade.js";
@@ -47,6 +48,7 @@ const state = {
   latestPingId: null,
   agentResponses: new Map(),
   pendingTargets: new Set(),
+  stopTargetAgentId: null,
   shiftsBusy: false,
   shiftsDiscovering: false,
   shiftsSnapshot: null,
@@ -101,6 +103,12 @@ function initialize() {
     "close-agent-status",
     "clear-agent-status",
     "ping-agents-again",
+    "agent-stop-dialog",
+    "agent-stop-target",
+    "close-agent-stop",
+    "stop-agent-only",
+    "quit-agent-program",
+    "cancel-agent-stop",
     "editor-section",
     "calendar-grid",
     "previous-year",
@@ -167,6 +175,16 @@ function bindEvents() {
   elements.pingAgentsAgain.addEventListener("click", () => runAgentAction("ping"));
   elements.agentStatusDialog.addEventListener("click", (event) => {
     if (event.target === elements.agentStatusDialog) closeAgentStatus();
+  });
+  elements.closeAgentStop.addEventListener("click", closeAgentStopDialog);
+  elements.cancelAgentStop.addEventListener("click", closeAgentStopDialog);
+  elements.stopAgentOnly.addEventListener("click", () => sendSelectedStopCommand("stop_agent"));
+  elements.quitAgentProgram.addEventListener("click", () => sendSelectedStopCommand("quit_program"));
+  elements.agentStopDialog.addEventListener("click", (event) => {
+    if (event.target === elements.agentStopDialog) closeAgentStopDialog();
+  });
+  elements.agentStopDialog.addEventListener("close", () => {
+    state.stopTargetAgentId = null;
   });
   elements.previousYear.addEventListener("click", () => changeYear(-1));
   elements.nextYear.addEventListener("click", () => changeYear(1));
@@ -683,11 +701,20 @@ async function pingAgents() {
   }
 }
 
-async function sendTargetAgentCommand(agentId, command) {
+const TARGET_COMMAND_COPY = {
+  pause: { verb: "pause", success: "pause" },
+  resume: { verb: "gjenoppta", success: "gjenopptakelse" },
+  stop_agent: { success: "stopp av agenten" },
+  quit_program: { success: "avslutning av ShiftWatch" },
+};
+
+async function sendTargetAgentCommand(agentId, command, { skipConfirmation = false } = {}) {
   const response = state.agentResponses.get(agentId);
-  if (!response?.supportsTargetedControl || state.pendingTargets.has(agentId)) return;
-  const verb = command === "pause" ? "pause" : "gjenoppta";
-  if (!window.confirm(`Vil du ${verb} bare ${response.label}?`)) return;
+  const targetBusy = state.pendingTargets.has(agentId);
+  if (!targetCommandAvailable(response, command, { targetBusy, cloudBusy: state.cloudBusy })) return;
+  const copy = TARGET_COMMAND_COPY[command];
+  if (!copy) return;
+  if (!skipConfirmation && copy.verb && !window.confirm(`Vil du ${copy.verb} bare ${response.label}?`)) return;
 
   state.pendingTargets.add(agentId);
   renderAgentStatus();
@@ -703,11 +730,16 @@ async function sendTargetAgentCommand(agentId, command) {
     }
     state.agentResponses.set(agentId, {
       ...response,
-      agentState: result.ack.agentState,
+      agentState:
+        command === "stop_agent"
+          ? "stopping"
+          : command === "quit_program"
+            ? "exiting"
+            : result.ack.agentState,
       lastCommandAtUtc: result.ack.appliedAtUtc,
     });
     setStatus(
-      `${response.label} bekreftet ${command === "pause" ? "pause" : "gjenopptakelse"}.`,
+      `${response.label} bekreftet ${copy.success}.`,
       "success",
     );
   } catch (error) {
@@ -717,6 +749,37 @@ async function sendTargetAgentCommand(agentId, command) {
     renderAgentStatus();
     updateCloudControls();
   }
+}
+
+function openAgentStopDialog(agentId) {
+  const response = state.agentResponses.get(agentId);
+  if (!targetCommandAvailable(response, "stop_agent", {
+    targetBusy: state.pendingTargets.has(agentId),
+    cloudBusy: state.cloudBusy,
+  })) return;
+  state.stopTargetAgentId = agentId;
+  elements.agentStopTarget.textContent = response.label;
+  if (typeof elements.agentStopDialog.showModal === "function") {
+    if (!elements.agentStopDialog.open) elements.agentStopDialog.showModal();
+  } else {
+    elements.agentStopDialog.setAttribute("open", "");
+  }
+}
+
+function closeAgentStopDialog() {
+  if (typeof elements.agentStopDialog.close === "function") {
+    if (elements.agentStopDialog.open) elements.agentStopDialog.close();
+  } else {
+    elements.agentStopDialog.removeAttribute("open");
+    state.stopTargetAgentId = null;
+  }
+}
+
+async function sendSelectedStopCommand(command) {
+  const agentId = state.stopTargetAgentId;
+  if (!agentId || !["stop_agent", "quit_program"].includes(command)) return;
+  closeAgentStopDialog();
+  await sendTargetAgentCommand(agentId, command, { skipConfirmation: true });
 }
 
 function renderAgentStatus(remainingMs = null) {
@@ -770,27 +833,48 @@ function renderAgentStatus(remainingMs = null) {
     const actions = document.createElement("div");
     actions.className = "agent-row-actions";
     const targetBusy = state.pendingTargets.has(response.agentId);
-    for (const command of ["pause", "resume"]) {
+    for (const command of ["pause", "resume", "stop_agent"]) {
       const button = document.createElement("button");
       button.type = "button";
-      button.className = `button ${command === "pause" ? "button-danger" : "button-primary"} button-small`;
+      button.className = `button ${command === "pause" ? "button-danger" : command === "resume" ? "button-primary" : "button-stop"} button-small`;
       button.textContent = targetBusy
         ? "Venter …"
         : command === "pause"
           ? "Pause"
-          : "Gjenoppta";
-      button.disabled =
-        !response.supportsTargetedControl || targetBusy || state.cloudBusy || state.pingBusy;
-      button.title = response.supportsTargetedControl
-        ? `${command === "pause" ? "Pause" : "Gjenoppta"} bare ${response.label}`
-        : "Krever den kommende ShiftWatch-agentoppdateringen";
-      button.addEventListener("click", () => sendTargetAgentCommand(response.agentId, command));
+          : command === "resume"
+            ? "Gjenoppta"
+            : "Stopp";
+      button.disabled = !targetCommandAvailable(response, command, {
+        targetBusy,
+        cloudBusy: state.cloudBusy,
+      });
+      if (command === "stop_agent") {
+        button.title = response.supportsTargetedStop
+          ? `Stopp bare ${response.label}`
+          : "Stopp krever den neste ShiftWatch-agentversjonen";
+        button.addEventListener("click", () => openAgentStopDialog(response.agentId));
+      } else {
+        const alreadyInState =
+          (command === "pause" && response.agentState === "paused") ||
+          (command === "resume" && response.agentState === "active");
+        button.title = !response.supportsTargetedControl
+          ? "Individuell styring krever en nyere ShiftWatch-agent"
+          : alreadyInState
+            ? `${response.label} er allerede ${command === "pause" ? "pauset" : "aktiv"}`
+            : `${command === "pause" ? "Pause" : "Gjenoppta"} bare ${response.label}`;
+        button.addEventListener("click", () => sendTargetAgentCommand(response.agentId, command));
+      }
       actions.append(button);
     }
     if (!response.supportsTargetedControl) {
       const note = document.createElement("small");
       note.className = "agent-capability-note";
-      note.textContent = "Individuell styring krever ny agentversjon";
+      note.textContent = "Pause/gjenoppta krever en nyere agentversjon";
+      actions.append(note);
+    } else if (!response.supportsTargetedStop) {
+      const note = document.createElement("small");
+      note.className = "agent-capability-note";
+      note.textContent = "Stopp krever den neste agentversjonen";
       actions.append(note);
     }
     row.append(identity, status, actions);
@@ -799,7 +883,14 @@ function renderAgentStatus(remainingMs = null) {
 }
 
 function agentStateLabel(value) {
-  return { active: "Aktiv", paused: "Pauset", unknown: "Status ukjent" }[value] ?? "Status ukjent";
+  return {
+    active: "Aktiv",
+    paused: "Pauset",
+    stopping: "Stopper",
+    stopped: "Stoppet",
+    exiting: "Avslutter",
+    unknown: "Status ukjent",
+  }[value] ?? "Status ukjent";
 }
 
 function openAgentStatus() {
@@ -820,9 +911,11 @@ function closeAgentStatus() {
 }
 
 function clearAgentStatus() {
+  closeAgentStopDialog();
   state.latestPingId = null;
   state.agentResponses.clear();
   state.pendingTargets.clear();
+  state.stopTargetAgentId = null;
   renderAgentStatus();
   updateAgentControls();
 }
@@ -842,6 +935,7 @@ async function disconnectOneDrive() {
     );
     if (!disconnect) return;
   }
+  closeAgentStopDialog();
   window.sessionStorage.removeItem(PENDING_ACTION_KEY);
   clearEditorSnapshot();
   state.calendar = null;
@@ -866,6 +960,7 @@ async function disconnectOneDrive() {
   state.latestPingId = null;
   state.agentResponses.clear();
   state.pendingTargets.clear();
+  state.stopTargetAgentId = null;
   elements.editorSection.classList.add("is-disabled");
   renderAgentStatus();
   updateCloudControls();
@@ -967,8 +1062,9 @@ function updateAgentControls() {
   const unavailable = !agentControl || state.cloudBusy || state.shiftsDiscovering;
   elements.pauseAllAgents.disabled = unavailable || state.agentCommandBusy;
   elements.resumeAllAgents.disabled = unavailable || state.agentCommandBusy;
-  elements.pingAgents.disabled = unavailable || state.pingBusy;
-  elements.pingAgentsAgain.disabled = unavailable || state.pingBusy;
+  elements.pingAgents.disabled = unavailable || state.pingBusy || state.pendingTargets.size > 0;
+  elements.pingAgentsAgain.disabled = unavailable || state.pingBusy || state.pendingTargets.size > 0;
+  elements.clearAgentStatus.disabled = state.pendingTargets.size > 0;
   elements.openAgentStatus.disabled = !state.latestPingId && state.agentResponses.size === 0;
 }
 

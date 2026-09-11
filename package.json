@@ -1,6 +1,6 @@
 {
   "name": "shiftwatch-calendar-web",
-  "version": "2.3.1",
+  "version": "2.4.0",
   "private": true,
   "type": "module",
   "description": "Backend-free responsive OneDrive calendar editor for ShiftWatch.",

@@ -73,7 +73,7 @@
             <h3 id="simple-log-title">Enkel vaktlogg · siste 48 timer</h3>
             <button id="refresh-simple-log" class="button button-ghost" type="button" disabled>Oppdater logg</button>
           </div>
-          <p id="simple-log-status" role="status">Hentes sammen med kalenderen. Krever kommende agentoppdatering.</p>
+          <p id="simple-log-status" role="status">Hentes sammen med kalenderen. Krever ShiftWatch-agent v112.1 eller nyere.</p>
           <div id="simple-log-list" class="simple-log-list" aria-label="Vaktmeldinger og endelige resultater">
             <p class="empty-state">Ingen logg hentet ennå.</p>
           </div>
@@ -171,7 +171,7 @@
               <p>En ny, høyere prioritert vakt tas først. Bare etter bekreftet overtakelse forsøkes annonsering av én tidligere vakt med lavest prioritet i samme uke. Feiler annonseringen, beholdes den nye vakten og du får beskjed.</p>
               <p>Fredag og søndag følger vanlige kriterier og inngår ikke i denne prioriteringsrekken. Lik eller lavere prioritet gir ingen erstatning.</p>
               <p>«Markert ledig» betyr annonsert, ikke at noen andre har overtatt ansvaret.</p>
-              <p>Krever kommende agentoppdatering. Oppdater alle agenter før funksjonen brukes; eldre agenter kjenner ikke ukeprioriteringen.</p>
+              <p>Krever ShiftWatch-agent v112.1 eller nyere. Oppdater alle agenter før funksjonen brukes; eldre agenter kjenner ikke ukeprioriteringen.</p>
             </details>
           </section>
           <section class="card selection-card">
@@ -242,8 +242,35 @@
       </div>
     </dialog>
 
+    <dialog id="agent-stop-dialog" class="agent-stop-dialog" aria-labelledby="agent-stop-title">
+      <div class="dialog-heading">
+        <div>
+          <p class="eyebrow dialog-eyebrow">Målrettet kommando</p>
+          <h2 id="agent-stop-title">Stopp agent</h2>
+        </div>
+        <button id="close-agent-stop" class="dialog-close" type="button" aria-label="Avbryt stopp">×</button>
+      </div>
+      <div class="agent-stop-content">
+        <p>Hva vil du gjøre på <strong id="agent-stop-target">den valgte agenten</strong>?</p>
+        <p class="agent-stop-hint">
+          Begge valgene stopper overvåkingen og deaktiverer keep-awake på den PC-en.
+        </p>
+        <div class="agent-stop-actions">
+          <button id="stop-agent-only" class="button button-blue" type="button">
+            Stopp agent
+            <small>Behold ShiftWatch Control-vinduet åpent</small>
+          </button>
+          <button id="quit-agent-program" class="button button-stop" type="button">
+            Avslutt ShiftWatch helt
+            <small>Stopp agenten og lukk kontrollvinduet</small>
+          </button>
+          <button id="cancel-agent-stop" class="button button-ghost" type="button">Avbryt</button>
+        </div>
+      </div>
+    </dialog>
+
     <footer>
-      ShiftWatch Frontend 2.3.1 ·
+      ShiftWatch Frontend 2.4.0 ·
       Ingen backend. Kalender- og agentsignaler sendes bare mellom nettleseren og din private OneDrive App Folder.
     </footer>
 

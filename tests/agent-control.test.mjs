@@ -5,9 +5,13 @@ import { FrontendAgentControl } from "../src/agent-control.js";
 import {
   REMOTE_CONTROL_FILENAME,
   TARGETED_CONTROL_CAPABILITY,
+  TARGETED_STOP_CAPABILITY,
   buildRemoteControlPayload,
+  buildTargetControlPayload,
   parsePingResponse,
+  parseTargetAck,
   pingResponsePrefix,
+  targetCommandAvailable,
   targetAckFilename,
   targetControlFilename,
 } from "../src/agent-control-core.js";
@@ -51,6 +55,7 @@ test("accepts legacy ping responses and safely detects targeted-control capabili
   );
   assert.equal(legacy.agentState, "unknown");
   assert.equal(legacy.supportsTargetedControl, false);
+  assert.equal(legacy.supportsTargetedStop, false);
 
   const upgraded = parsePingResponse(
     {
@@ -67,6 +72,7 @@ test("accepts legacy ping responses and safely detects targeted-control capabili
   );
   assert.equal(upgraded.agentState, "active");
   assert.equal(upgraded.supportsTargetedControl, true);
+  assert.equal(upgraded.supportsTargetedStop, false);
   assert.equal(
     parsePingResponse(
       {
@@ -81,6 +87,49 @@ test("accepts legacy ping responses and safely detects targeted-control capabili
     ),
     null,
   );
+});
+
+test("target controls are state-aware, available during ping, and stop is capability-gated", () => {
+  const active = parsePingResponse({
+    schema_version: 1,
+    ping_id: "ping-1",
+    requester_agent_id: "frontend-test",
+    responder_agent_id: "agent-new",
+    responder_label: "HOME-PC/new",
+    responded_at_utc: "2026-08-22T12:00:04Z",
+    agent_state: "active",
+    capabilities: [TARGETED_CONTROL_CAPABILITY, TARGETED_STOP_CAPABILITY],
+  }, { requesterAgentId: "frontend-test", pingId: "ping-1" });
+  assert.equal(active.supportsTargetedStop, true);
+  assert.equal(targetCommandAvailable(active, "pause", { pingBusy: true }), true);
+  assert.equal(targetCommandAvailable(active, "resume", { pingBusy: true }), false);
+  assert.equal(targetCommandAvailable(active, "stop_agent", { pingBusy: true }), true);
+  assert.equal(targetCommandAvailable({ ...active, agentState: "paused" }, "pause"), false);
+  assert.equal(targetCommandAvailable({ ...active, agentState: "paused" }, "resume"), true);
+  assert.equal(targetCommandAvailable({ ...active, agentState: "exiting" }, "stop_agent"), false);
+  assert.equal(targetCommandAvailable({ ...active, supportsTargetedStop: false }, "stop_agent"), false);
+  assert.equal(targetCommandAvailable(active, "pause", { targetBusy: true }), false);
+  assert.equal(targetCommandAvailable(active, "pause", { cloudBusy: true }), false);
+});
+
+test("builds explicit stop/quit commands and rejects mismatched acknowledgements", () => {
+  const stop = buildTargetControlPayload("stop_agent", {
+    issuerAgentId: "frontend-test", issuerLabel: "ShiftWatch Frontend",
+    targetAgentId: "agent-2", commandId: "stop-1", now: fixedNow,
+  });
+  const quit = buildTargetControlPayload("quit_program", {
+    issuerAgentId: "frontend-test", issuerLabel: "ShiftWatch Frontend",
+    targetAgentId: "agent-2", commandId: "quit-1", now: fixedNow,
+  });
+  assert.equal(stop.command, "stop_agent");
+  assert.equal(quit.command, "quit_program");
+  const ackPayload = {
+    schema_version: 1, command_id: "quit-1", requester_agent_id: "frontend-test",
+    responder_agent_id: "agent-2", responder_label: "HOME-PC/agent-2",
+    command: "quit_program", applied_at_utc: "2026-08-22T12:00:02Z", agent_state: "exiting",
+  };
+  assert.equal(parseTargetAck(ackPayload, { commandId: "quit-1", command: "quit_program" }).agentState, "exiting");
+  assert.equal(parseTargetAck(ackPayload, { commandId: "quit-1", command: "stop_agent" }), null);
 });
 
 test("publishes ping, collects matching response files and ignores old pings", async () => {

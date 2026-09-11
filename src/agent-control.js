@@ -125,6 +125,7 @@ export class FrontendAgentControl {
             requesterAgentId: this.agentId,
             targetAgentId,
             commandId: payload.command_id,
+            command,
           });
           if (ack) return { payload, ack };
         } catch (_error) {

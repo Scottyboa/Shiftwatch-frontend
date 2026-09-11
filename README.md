@@ -1,8 +1,25 @@
 # ShiftWatch Kalender
 
-Versjon **2.3.1** retter publisering av ukevalg til personlig OneDrive.
+Versjon **2.4.0** gjør individuell agentstyring tilgjengelig mens ping fortsatt
+pågår og forbereder målrettet stopp/avslutning for neste agentversjon.
 Bygger på det komplette v2.2.0-repoet og beholder kalender, Mine vakter,
 agentkontroll og Safari/WebKit-retting. Ingen endringer er publisert til GitHub.
+
+## Nytt i 2.4.0
+
+- **Pause** og **Gjenoppta** kan brukes straks den enkelte agenten svarer; du
+  trenger ikke vente på at 20-sekundersnedtellingen avsluttes.
+- Knappene følger rapportert status: aktiv agent tilbyr Pause, mens pauset agent
+  tilbyr Gjenoppta. Ved ukjent status er begge tilgjengelige når agenten støtter dem.
+- Hver agentrad har en ny **Stopp**-knapp. Den åpner et separat valg mellom å
+  stoppe bare agentovervåkingen eller avslutte hele ShiftWatch-programmet.
+- Stopp er capability-styrt og målrettet mot eksakt agent-ID. v112.1 og eldre
+  kan fortsatt pinges og styres som før, men Stopp forblir deaktivert til den
+  neste agentoppdateringen er installert.
+- Ny cacheversjon sørger for at mobil og PC henter de nye kontrollene.
+
+Den avtalte agentkontrakten finnes i
+[docs/targeted-stop-protocol.md](docs/targeted-stop-protocol.md).
 
 ## Rettet i 2.3.1
 
@@ -97,12 +114,16 @@ Etter Microsoft-innlogging kan frontenden også:
 - sende **Pause alle** og **Gjenoppta alle** til eksisterende ShiftWatch-agenter;
 - sende **Ping alle** og samle svar i et eget statusvindu i 20 sekunder;
 - vise agentnavn, stabil agent-ID og svartid;
-- vise individuelle **Pause**/**Gjenoppta**-knapper på hver agentrad.
+- vise individuelle **Pause**/**Gjenoppta**-knapper straks et svar kommer;
+- vise en capability-styrt **Stopp**-knapp med valgene «Stopp agent» og
+  «Avslutt ShiftWatch helt».
 
 De tre globale handlingene bruker den eksisterende v109-protokollen.
 Agent v110 viser aktiv/pauset-status og støtter individuelle knapper gjennom
 `targeted_control_v1`. Eldre agentsvar uten status vises som `Status ukjent`,
 og individuelle knapper er deaktivert hvis agenten mangler denne støtten.
+Målrettet stopp bruker den separate egenskapen `targeted_stop_v1`; frontenden
+sender aldri stopp til en agent som ikke uttrykkelig har annonsert denne.
 
 Ping bekrefter bare hvem som svarte. Manglende svar kan skyldes at PC-en eller
 agenten er stoppet, manglende nett, eller en midlertidig Graph-feil; frontenden

@@ -3,9 +3,11 @@ export const PING_RESPONSE_PREFIX = "shiftwatch_agent_ping_response_";
 export const TARGET_CONTROL_PREFIX = "shiftwatch_agent_target_control_";
 export const TARGET_ACK_PREFIX = "shiftwatch_agent_target_ack_";
 export const TARGETED_CONTROL_CAPABILITY = "targeted_control_v1";
+export const TARGETED_STOP_CAPABILITY = "targeted_stop_v1";
 
 const BROADCAST_COMMANDS = new Set(["pause", "resume", "ping"]);
-const TARGET_COMMANDS = new Set(["pause", "resume"]);
+const TARGET_COMMANDS = new Set(["pause", "resume", "stop_agent", "quit_program"]);
+const TERMINAL_AGENT_STATES = new Set(["stopping", "stopped", "exiting"]);
 
 export function sanitizeAgentId(value) {
   const safe = String(value ?? "")
@@ -78,7 +80,9 @@ function normalizeCapabilities(value) {
 
 function normalizeAgentState(value) {
   const state = String(value ?? "").trim().toLowerCase();
-  return state === "active" || state === "paused" ? state : "unknown";
+  return ["active", "paused", "stopping", "stopped", "exiting"].includes(state)
+    ? state
+    : "unknown";
 }
 
 export function parsePingResponse(payload, { requesterAgentId, pingId } = {}) {
@@ -106,12 +110,31 @@ export function parsePingResponse(payload, { requesterAgentId, pingId } = {}) {
     agentState: normalizeAgentState(payload.agent_state),
     capabilities,
     supportsTargetedControl: capabilities.includes(TARGETED_CONTROL_CAPABILITY),
+    supportsTargetedStop: capabilities.includes(TARGETED_STOP_CAPABILITY),
   };
+}
+
+export function targetCommandAvailable(
+  response,
+  command,
+  { targetBusy = false, cloudBusy = false } = {},
+) {
+  const normalizedCommand = String(command ?? "").trim().toLowerCase();
+  if (!TARGET_COMMANDS.has(normalizedCommand) || targetBusy || cloudBusy) return false;
+  const state = normalizeAgentState(response?.agentState);
+  if (TERMINAL_AGENT_STATES.has(state)) return false;
+  if (["stop_agent", "quit_program"].includes(normalizedCommand)) {
+    return response?.supportsTargetedStop === true;
+  }
+  if (response?.supportsTargetedControl !== true) return false;
+  if (normalizedCommand === "pause" && state === "paused") return false;
+  if (normalizedCommand === "resume" && state === "active") return false;
+  return true;
 }
 
 export function parseTargetAck(
   payload,
-  { requesterAgentId, targetAgentId, commandId } = {},
+  { requesterAgentId, targetAgentId, commandId, command } = {},
 ) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     throw new Error("Agentbekreftelsen er ikke et JSON-objekt");
@@ -132,5 +155,6 @@ export function parseTargetAck(
   if (commandId && ack.commandId !== commandId) return null;
   if (requesterAgentId && ack.requesterAgentId !== requesterAgentId) return null;
   if (targetAgentId && ack.agentId !== targetAgentId) return null;
+  if (command && ack.command !== String(command).trim().toLowerCase()) return null;
   return ack;
 }
